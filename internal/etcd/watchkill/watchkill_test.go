@@ -85,7 +85,16 @@ func TestWatchStreamDisconnectSignalsReconnectWithoutRetry(t *testing.T) {
 
 	// Nothing further but (at most) more reconnect signals from the
 	// flapping connection: no data events are synthesized from a dead
-	// stream, and the channel stays open.
+	// stream, and the channel stays open. A watcher that scheduled a
+	// retry on a bare stream disconnect would emit its next signal about
+	// one retry delay — six hundred milliseconds — after an earlier one,
+	// while sporadic connection flapping spaces its signals by the
+	// connection's own backoff, a second or more apart. The absence of
+	// that retry cadence is the "without scheduling a retry" half of the
+	// obligation, so a signal landing about one first retry delay after
+	// an earlier signal fails the test.
+	first := time.Now()
+	arrivals := []time.Duration{0} // the first signal, just received
 	quiet := time.After(1500 * time.Millisecond)
 	for {
 		select {
@@ -96,6 +105,13 @@ func TestWatchStreamDisconnectSignalsReconnectWithoutRetry(t *testing.T) {
 			if e.Kind != etcd.EventReconnect {
 				t.Fatalf("data event %#v after the disconnect, want none", e)
 			}
+			since := time.Since(first)
+			for _, prev := range arrivals {
+				if gap := since - prev; gap >= 450*time.Millisecond && gap <= 750*time.Millisecond {
+					t.Fatalf("reconnect signal %v after an earlier one, about the six-hundred-millisecond first retry delay; want no scheduled retry", gap)
+				}
+			}
+			arrivals = append(arrivals, since)
 		case <-quiet:
 			return
 		}

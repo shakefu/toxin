@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io/fs"
 	"os"
+	"strings"
 
 	"github.com/shakefu/toxin"
 )
@@ -92,9 +93,10 @@ func printJSON(v any) error {
 }
 
 // get prints the value returned for the key. An unset key is a value
-// outcome, not an error: it exits one without printing anything — nil is
-// the unset answer at the Config boundary, so a stored JSON null reads the
-// same way.
+// outcome, not an error: it exits one without printing anything. GetStrict
+// answers a stored JSON null as a found value — nil — so it prints as
+// null rather than reading as the unset case; its 'No setting "<key>"'
+// error is the unset marker, and every other failure reaches the caller.
 //
 // @cmd Get a configuration key
 func get(ctx context.Context,
@@ -105,12 +107,12 @@ func get(ctx context.Context,
 	if err != nil {
 		return err
 	}
-	v, err := conf.Get(key, nil)
+	v, err := conf.GetStrict(key)
 	if err != nil {
+		if strings.HasPrefix(err.Error(), `No setting "`) {
+			return silentExit(1)
+		}
 		return err
-	}
-	if v == nil {
-		return silentExit(1)
 	}
 	return printJSON(v)
 }

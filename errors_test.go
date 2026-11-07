@@ -121,6 +121,34 @@ func TestNewRejectsUnopenableFileCacheDirectory(t *testing.T) {
 	}
 }
 
+// 20-api@toxin.New::ERROR: a file in the cache directory that cannot be
+// opened — a read-only cache directory — rejects construction with
+// "Could not open toxin cache: <cause>" too.
+func TestNewRejectsUnopenableFileCacheFile(t *testing.T) {
+	clearToxinEnv(t)
+	t.Setenv("TOXIN_ETCD", testutil.Etcd(t))
+
+	// The directory itself can be created and entered; only opening a file
+	// inside it fails.
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatalf("making the cache directory read-only: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+
+	_, err := New(WithFileCache(dir))
+	if err == nil {
+		t.Fatal("New accepted a cache directory whose file cannot be opened, want error")
+	}
+	if !strings.HasPrefix(err.Error(), "Could not open toxin cache: ") {
+		t.Fatalf("error = %q, want prefix %q", err.Error(), "Could not open toxin cache: ")
+	}
+	var cause *fs.PathError
+	if !errors.As(err, &cause) {
+		t.Errorf("error %q does not wrap the underlying cause", err)
+	}
+}
+
 // 10-etcd3@etcd.Client::ERROR, bound by toxin.New's whole-spec CONFORMS: a
 // member matching none of the accepted forms is rejected with an error
 // naming the member.

@@ -48,6 +48,28 @@ func TestGetUnsetKeyExitsOneSilently(t *testing.T) {
 	}
 }
 
+// cli.Get RETURN: a key stored as JSON null prints as null — a found
+// value, distinct from the unset case's silent exit one.
+func TestGetPrintsStoredNullAsNull(t *testing.T) {
+	newTestConfig(t, "tget-null/")
+
+	out, errOut, code := runCLI("set", "tget-null/", "nulled", "null")
+	if code != 0 {
+		t.Fatalf("set null: exit code %d, stderr %q", code, errOut)
+	}
+	if out != "" || errOut != "" {
+		t.Fatalf("set null printed stdout %q stderr %q", out, errOut)
+	}
+
+	out, errOut, code = runCLI("get", "tget-null/", "nulled")
+	if code != 0 {
+		t.Fatalf("get of a stored null: exit code %d, stderr %q", code, errOut)
+	}
+	if out != "null\n" {
+		t.Errorf("get of a stored null = %q, want %q", out, "null\n")
+	}
+}
+
 // cli.Set SIDE-EFFECT/RETURN: sets the key to the value and prints
 // nothing on success. The value is the command-line string, stored
 // verbatim.

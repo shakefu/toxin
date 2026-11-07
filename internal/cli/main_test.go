@@ -248,6 +248,14 @@ func TestMainVerboseRepeatsLowerLogLevel(t *testing.T) {
 		t.Errorf("-v did not lower the level to warn; stderr %q", libErr)
 	}
 
+	// The long spelling lowers the level the same way.
+	libErr = captureStderrLog(func() {
+		_, _, _ = runCLI("--verbose", "get", "tverbose/", "nokey")
+	})
+	if !strings.Contains(libErr, "Key not found") {
+		t.Errorf("--verbose did not lower the level to warn; stderr %q", libErr)
+	}
+
 	// Held at silly: no amount of repeats errors or goes quieter.
 	libErr = captureStderrLog(func() {
 		_, _, code := runCLI("-vvvvvv", "get", "tverbose/", "nokey")

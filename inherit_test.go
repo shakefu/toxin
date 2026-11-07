@@ -3,6 +3,8 @@ package toxin
 import (
 	"strings"
 	"testing"
+
+	"github.com/shakefu/toxin/internal/testutil"
 )
 
 // setupInherit seeds a key-based inheritance chain on the real server:
@@ -113,6 +115,80 @@ func TestInheritDepthConsumedPerLevel(t *testing.T) {
 	}
 	if got != "default" {
 		t.Errorf("depth-0 Get = %v, want the default %q", got, "default")
+	}
+}
+
+// 20-api@toxin.New::INPUT: TOXIN_INHERIT_DEPTH is consulted when the
+// inherit depth option is not supplied, so a valid value there is applied —
+// depth one stops inheritance one level earlier than the default two.
+func TestNewAppliesValidTOXINInheritDepth(t *testing.T) {
+	raw := newRawClient(t)
+	rawPut(t, raw, "/inh-env/config.inherit", "inh-env-base")
+	rawPut(t, raw, "/inh-env-base/config.inherit", "inh-env-root")
+	rawPut(t, raw, "/inh-env-root/deep.key", "from-root")
+
+	// The default depth two reaches the grandparent.
+	deep := newTestConfig(t, WithPrefix("inh-env/"))
+	got, err := deep.Get("deep.key", "default")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got != "from-root" {
+		t.Errorf("default-depth Get = %v, want the grandparent's %q", got, "from-root")
+	}
+
+	// TOXIN_INHERIT_DEPTH=1 stops at the parent, one level earlier.
+	clearToxinEnv(t)
+	t.Setenv("TOXIN_ETCD", testutil.Etcd(t))
+	t.Setenv("TOXIN_INHERIT_DEPTH", "1")
+	shallow, err := New(WithPrefix("inh-env/"))
+	if err != nil {
+		t.Fatalf("New with TOXIN_INHERIT_DEPTH=1: %v", err)
+	}
+	if shallow.inheritDepth != 1 {
+		t.Errorf("inheritDepth = %d, want 1 applied from TOXIN_INHERIT_DEPTH", shallow.inheritDepth)
+	}
+	got, err = shallow.Get("deep.key", "default")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got != "default" {
+		t.Errorf("depth-from-env Get = %v, want inheritance stopped one level earlier than the default (%q)", got, "default")
+	}
+}
+
+// 20-api@Inheritance rule 4: an unreadable inherit value — the inherit-key
+// read itself failing — disables inheritance for the rest of the config's
+// life.
+func TestUnreadableInheritValueDisablesInheritanceForLife(t *testing.T) {
+	setupInherit(t, "inh-unreadable/")
+	c := newTestConfig(t, WithPrefix("inh-unreadable/"))
+	buf := captureLog(c)
+
+	// Dump consults inheritance before its own read, so with the cluster
+	// connection closed its first etcd contact is the inherit-key read —
+	// which fails without a not-found shape.
+	if err := c.client.Close(); err != nil {
+		t.Fatalf("closing the client: %v", err)
+	}
+	_, _ = c.Dump()
+	if !strings.Contains(buf.String(), "Error getting inheritance value") {
+		t.Errorf("warning %q does not report the failed inherit-key read", buf.String())
+	}
+
+	// Inheritance stays disabled for later lookups: the connection works
+	// again, the chain is resolvable, and the parent's value is still not
+	// consulted.
+	c.client = newRawClient(t)
+	got, err := c.Get("shared.key", "default", Cached(false))
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got != "default" {
+		t.Errorf("Get after an unreadable inherit key = %v, want inheritance disabled for life (%q)", got, "default")
+	}
+	if c.inherit {
+		t.Error("inherit is still enabled after an unreadable inherit value")
 	}
 }
 

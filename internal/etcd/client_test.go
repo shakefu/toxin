@@ -275,19 +275,12 @@ func TestNewWarnsAndIgnoresIncompleteTOXINAUTH(t *testing.T) {
 	}
 }
 
-// etcd.Client INPUT: when TOXIN_AUTH carries user:password credentials,
-// use them for basic authentication.
-func TestNewUsesTOXINAUTHCredentialsForBasicAuthentication(t *testing.T) {
-	clearEtcdEnv(t)
-	endpoint := testutil.Etcd(t)
+// enableAuth turns on authentication for the cluster behind endpoint with
+// the root user "root"/"sekretpw", disabling auth and removing the user
+// again when the test ends.
+func enableAuth(t *testing.T, endpoint string) {
+	t.Helper()
 	ctx := context.Background()
-
-	// The unauthenticated client is built before auth is enabled.
-	plain, err := New(endpoint)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	defer plain.Close()
 
 	admin, err := clientv3.New(clientv3.Config{Endpoints: []string{endpoint}})
 	if err != nil {
@@ -316,6 +309,23 @@ func TestNewUsesTOXINAUTHCredentialsForBasicAuthentication(t *testing.T) {
 		_, _ = root.Auth.AuthDisable(context.Background())
 		_, _ = root.Auth.UserDelete(context.Background(), "root")
 	})
+}
+
+// etcd.Client INPUT: when TOXIN_AUTH carries user:password credentials,
+// use them for basic authentication.
+func TestNewUsesTOXINAUTHCredentialsForBasicAuthentication(t *testing.T) {
+	clearEtcdEnv(t)
+	endpoint := testutil.Etcd(t)
+	ctx := context.Background()
+
+	// The unauthenticated client must face a cluster demanding basic
+	// authentication.
+	plain, err := New(endpoint)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer plain.Close()
+	enableAuth(t, endpoint)
 
 	// Without credentials the cluster refuses the request, so the server
 	// is really demanding basic authentication.
@@ -333,6 +343,43 @@ func TestNewUsesTOXINAUTHCredentialsForBasicAuthentication(t *testing.T) {
 		t.Fatalf("authenticated Put: %v", err)
 	}
 	entries, err := authed.Read(ctx, "/client-auth/k", false)
+	if err != nil || len(entries) != 1 || entries[0].Value != "authenticated" {
+		t.Errorf("authenticated Read = %+v, %v; want the written value back", summarize(entries), err)
+	}
+}
+
+// etcd.Client INPUT: a member of the form
+// scheme://user:password@host:port carries basic authentication
+// credentials, which are used for the client's requests.
+func TestNewUsesMemberCredentialsForBasicAuthentication(t *testing.T) {
+	clearEtcdEnv(t)
+	endpoint := testutil.Etcd(t)
+	ctx := context.Background()
+	enableAuth(t, endpoint)
+
+	// Without credentials the cluster refuses the request, so the server
+	// is really demanding basic authentication.
+	plain, err := New(endpoint)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer plain.Close()
+	if _, err := plain.Put(ctx, "/member-auth/k", "v", 0); err == nil {
+		t.Fatal("unauthenticated Put succeeded, want the cluster to refuse it")
+	}
+
+	authed, err := New("http://root:sekretpw@" + strings.TrimPrefix(endpoint, "http://"))
+	if err != nil {
+		t.Fatalf("New with member credentials: %v", err)
+	}
+	defer authed.Close()
+	if got := authed.Endpoints(); !reflect.DeepEqual(got, []string{endpoint}) {
+		t.Errorf("endpoints = %v, want [%s]", got, endpoint)
+	}
+	if _, err := authed.Put(ctx, "/member-auth/k", "authenticated", 0); err != nil {
+		t.Fatalf("authenticated Put: %v", err)
+	}
+	entries, err := authed.Read(ctx, "/member-auth/k", false)
 	if err != nil || len(entries) != 1 || entries[0].Value != "authenticated" {
 		t.Errorf("authenticated Read = %+v, %v; want the written value back", summarize(entries), err)
 	}
