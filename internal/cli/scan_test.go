@@ -208,8 +208,32 @@ func TestScanSourceAnnotations(t *testing.T) {
 // cli.Scan INPUT: a directory target is walked recursively for files
 // ending in ".go"; RETURN: its filenames show relative to the target
 // directory's parent, and a file that fails to parse is skipped silently.
+// The unparseable .go file is written at runtime: gofmt parses with the
+// very parser the scanner uses, so a file the scanner must reject cannot
+// sit in the repository without breaking `gofmt -l .` over it.
 func TestScanDirectoryWalk(t *testing.T) {
-	out, errOut, code := runCLI("-f", "testdata/scan", "-c", "-s")
+	target := filepath.Join(t.TempDir(), "scan")
+	if err := os.MkdirAll(filepath.Join(target, "sub"), 0o755); err != nil {
+		t.Fatalf("building the walk tree: %v", err)
+	}
+	files := map[string]string{
+		"testdata/scan/calls.go":     "calls.go",
+		"testdata/scan/sub/inner.go": "sub/inner.go",
+	}
+	for src, dst := range files {
+		content, err := os.ReadFile(src)
+		if err != nil {
+			t.Fatalf("reading %s: %v", src, err)
+		}
+		if err := os.WriteFile(filepath.Join(target, filepath.FromSlash(dst)), content, 0o644); err != nil {
+			t.Fatalf("writing %s: %v", dst, err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(target, "broken.go"), []byte("this is not Go source and the scanner must skip it silently\n"), 0o644); err != nil {
+		t.Fatalf("writing broken.go: %v", err)
+	}
+
+	out, errOut, code := runCLI("-f", target, "-c", "-s")
 	if code != 0 {
 		t.Fatalf("exit code %d, stderr %q", code, errOut)
 	}
@@ -445,7 +469,7 @@ func TestScanUsageListsTargets(t *testing.T) {
 
 // filepath.Join sanity for fixtures: the walk target exists.
 func TestScanFixturesExist(t *testing.T) {
-	for _, p := range []string{"testdata/scan/calls.go", "testdata/scan/sub/inner.go", "testdata/scan/broken.go", "testdata/live.go", filepath.Join("testdata", "scannermod", "lib", "lib.go")} {
+	for _, p := range []string{"testdata/scan/calls.go", "testdata/scan/sub/inner.go", "testdata/live.go", filepath.Join("testdata", "scannermod", "lib", "lib.go")} {
 		if _, err := os.Stat(p); err != nil {
 			t.Errorf("fixture %s: %v", p, err)
 		}
