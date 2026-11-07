@@ -1,0 +1,266 @@
+# yaml-language-server: $schema=https://shakefu.github.io/yass/v1.schema.json
+---
+description: >
+  The public Go API of the toxin library: constructing a Config bound to a
+  namespace, getting and setting typed values with defaults and caching,
+  dumping and loading whole configurations, listing, clearing, watching,
+  reload hooks, the process-wide default instance, the file cache, and the
+  environment helpers. Ported from the public APIs of pyconfig and
+  jetconfig.
+version: v1
+---
+design: Inheritance
+type: ordered-rules
+content: |
+  A configuration may inherit from a parent configuration:
+
+  1. Key-based inheritance: the config stores a parent prefix under its
+     inherit key, "config.inherit" by default. The parent prefix is read
+     from the config's own namespace, without consulting inheritance, on
+     the first lookup that needs it; the resolved parent is cached
+     afterward.
+  2. Constructor-based inheritance: a string passed as the inherit option
+     fixes the parent prefix at construction.
+  3. Each level of inheritance consumes one unit of inherit depth. The
+     default depth is two; a depth of zero disables inheritance. A parent
+     instance inherits further only with depth remaining.
+  4. A missing, non-string, or unreadable inherit value disables
+     inheritance for the rest of the config's life.
+  5. Resolution order is parent first: the child's own keys win over equal
+     keys in any ancestor.
+  6. A parent namespace that holds nothing is not an error; the child
+     simply has no parent values.
+---
+spec: toxin.New
+INPUT:
+  - MUST: 'accept an options value supplying any subset of the configuration options, with defaults for the rest'
+  - MUST: 'default the prefix to "config/", the member list to 127.0.0.1:2379, caching on, case sensitivity off, inheritance on with inherit key "config.inherit" and inherit depth two, watching off, and clearing off'
+  - MUST: 'default the log level to critical'
+  - MUST: 'trim whitespace and slashes from the prefix and give it exactly one trailing slash'
+  - MUST: 'lowercase the prefix unless case sensitivity is enabled'
+  - WHEN: 'the prefix trims to nothing'
+    MUST: 'use the root prefix "/"'
+  - MUST: 'let `TOXIN_LOGLEVEL` override the log level option and `TOXIN_CACHE` supply the file cache directory'
+    USES: root@EnvNaming
+  - MUST: 'consult `TOXIN_PREFIX`, `TOXIN_WATCH` and `TOXIN_INHERIT_DEPTH` only when the corresponding option is not supplied'
+    USES: root@EnvNaming
+  - WHEN: 'watching is enabled'
+    MUST: 'start the watcher at construction'
+    SEE: Config.Watch
+  - WHEN: 'a file cache is configured'
+    MUST: 'create the cache directory and open a file in it at construction'
+    SEE: toxin.FileCache
+  - CONFORMS: 10-etcd3@etcd.Client
+RETURN:
+  - MUST: 'return a Config bound to the namespace prefix and the cluster'
+ERROR:
+  - WHEN: 'the log level is not one of silly, debug, info, warn or critical'
+    MUST: 'reject with the error "Unknown log level ''<level>''"'
+  - WHEN: 'the inherit depth is negative'
+    MUST: 'reject with the error "inheritDepth must be an integer greater than or equal to 0"'
+  - WHEN: '`TOXIN_INHERIT_DEPTH` is consulted and holds other than a non-negative integer'
+    MUST: 'reject with the error ''invalid TOXIN_INHERIT_DEPTH "<value>"'''
+    USES: root@EnvNaming
+  - WHEN: 'a file cache is configured and the cache directory cannot be created or a file in it cannot be opened'
+    MUST: 'reject with the error "Could not open toxin cache: <cause>"'
+---
+spec: Config.Get
+INPUT:
+  - MUST: 'take a setting key and an optional default which may be nil'
+  - MUST: 'take per-call options with defaults cached true, cacheResult true when caching is enabled, cacheOnly false and allowInherited true'
+  - MUST: 'lowercase the key unless case sensitivity is enabled'
+  - SEE: 10-etcd3@etcd.Read
+RETURN:
+  - WHEN: 'caching is enabled and the key is in the cache'
+    MUST: 'return the cached value without contacting etcd'
+  - WHEN: 'cacheOnly is set and the key is not in the cache'
+    MUST: 'return the default without contacting etcd'
+  - WHEN: 'cacheOnly is set and caching is disabled, by construction or for the call'
+    MUST: 'return the default without contacting etcd'
+  - WHEN: 'etcd holds the key'
+    MUST: 'decode the value, cache it unless cacheResult is false, and return it'
+    USES: 10-etcd3@ValueEncoding
+  - WHEN: 'etcd does not hold the key, inheritance is allowed, and the call is not cacheOnly'
+    MUST: 'consult the inherited chain before falling back'
+    USES: Inheritance
+  - WHEN: 'the key is unset and a default is given'
+    MUST: 'return the default and store it in the cache unless cacheResult is false'
+  - WHEN: 'the strict variant finds the key unset'
+    MUST: 'return the error ''No setting "<key>"'''
+ERROR:
+  - WHEN: 'the etcd read fails with anything other than not-found'
+    MUST: 'return that error to the caller'
+  - WHEN: 'the etcd response carries no entry'
+    MUST: 'treat the key as unset and log a warning'
+INVARIANT:
+  - MUST: 'treat an absent key as a value outcome answered by the default, never as an error outside the strict variant'
+---
+spec: Config.Set
+INPUT:
+  - MUST: 'take a setting key, a value of any JSON-encodable type, and per-call options ttl and cacheOnly'
+  - MUST: 'store a string value verbatim and JSON-encode any other value'
+    USES: 10-etcd3@ValueEncoding
+  - MUST: 'lowercase the key and write it under the prefix unless case sensitivity is enabled'
+    USES: 10-etcd3@EtcdKeys
+  - SEE: 10-etcd3@etcd.Put
+RETURN:
+  - MUST: 'report an etcd write failure to the caller'
+SIDE-EFFECT:
+  - WHEN: 'cacheOnly is set'
+    MUST: 'write the cache only, and nothing at all when caching is disabled'
+  - WHEN: 'cacheOnly is unset'
+    MUST: 'write etcd first and update the cache only after the write succeeds'
+---
+spec: Config.Dump
+INPUT:
+  - MUST: 'read the whole subtree under the prefix as the etcd read produces it'
+    CONFORMS: 10-etcd3@etcd.Read::RETURN
+  - MUST: 'trust the read''s ordering and boundary guarantees without re-validating them'
+RETURN:
+  - MUST: 'return a map from prefix-stripped, case-coerced key to decoded value'
+    USES: 10-etcd3@ValueEncoding
+  - WHEN: 'inheritance is allowed'
+    MUST: 'overlay the parent dump first so own keys win'
+    USES: Inheritance
+ERROR:
+  - WHEN: 'no entry exists under the prefix and the prefix is not the root'
+    MUST: 'return the not-found error rendered as ''Key not found: /<prefix>'''
+    CONFORMS: 10-etcd3@etcd.Error
+---
+spec: Config.Load
+INPUT:
+  - MUST: 'take no config or a nested map, with options cacheOnly true, merge true, allowInherited true and fileCacheOnly false'
+  - MUST: 'flatten a nested map into dot-notation keys by recursing through nested maps only'
+  - MUST: 'keep a slice as a single value and a top-level key that already contains a dot as-is'
+  - WHEN: 'a nested map is empty'
+    MUST: 'store it as an empty map value'
+  - WHEN: 'no config is given and a file cache is configured'
+    MUST: 'read the file cache in place of etcd'
+    SEE: toxin.FileCache
+  - WHEN: 'fileCacheOnly is set'
+    MUST: 'never contact etcd'
+  - WHEN: 'no config is given, no cache file was read, and fileCacheOnly is unset'
+    MUST: 'load the etcd configuration under the prefix'
+    SEE: Config.Dump
+RETURN:
+  - MUST: 'return the resulting cache map'
+  - WHEN: 'no config was given and the namespace holds nothing'
+    MUST: 'yield an empty cache without error'
+SIDE-EFFECT:
+  - WHEN: 'a cache file was read'
+    MUST: 'populate the cache from the file cache without contacting etcd, clearing the cache, or saving the cache file'
+    SEE: toxin.FileCache
+  - WHEN: 'no cache file was read, fileCacheOnly is unset, and merge is false'
+    MUST: 'clear the cache before loading'
+  - WHEN: 'no cache file was read and fileCacheOnly is unset'
+    MUST: 'merge the loaded keys into the cache'
+  - WHEN: 'no cache file was read, fileCacheOnly is unset, and cacheOnly is false'
+    MUST: 'write every loaded key to etcd, merged over what exists rather than replacing it'
+  - WHEN: 'no cache file was read, fileCacheOnly is unset, and a file cache is configured'
+    MUST: 'save the cache file after loading'
+  - MUST: 'run the registered reload hooks after the load'
+    SEE: toxin.ReloadHook
+---
+spec: Config.List
+INPUT:
+  - MUST: 'take an optional key below the prefix and an option dirOnly defaulting to true'
+RETURN:
+  - MUST: 'return the immediate children of the prefix and key, relative to the combined prefix-and-key address'
+  - WHEN: 'dirOnly is set'
+    MUST: 'return only children that are directories, without a trailing slash'
+  - WHEN: 'dirOnly is unset'
+    MUST: 'return leaf keys as-is and directory keys with a trailing slash'
+  - WHEN: 'nothing exists under the namespace'
+    MUST: 'return an empty list'
+  - SEE: 10-etcd3@etcd.Read
+---
+spec: Config.Clear
+INPUT:
+  - MUST: 'take an option cacheOnly defaulting to false'
+ERROR:
+  - WHEN: 'the allowClear option is off'
+    MUST: 'return the error "clear() is not allowed on this instance"'
+SIDE-EFFECT:
+  - WHEN: 'cacheOnly is unset'
+    MUST: 'recursively delete the prefix namespace'
+    SEE: 10-etcd3@etcd.Delete
+  - WHEN: 'the namespace is already empty'
+    MUST: 'succeed without error and leave the cache as it is'
+  - WHEN: 'cacheOnly is set or the namespace delete removed entries'
+    MUST: 'empty the cache'
+---
+spec: Config.Watch
+INPUT:
+  - SEE: 10-etcd3@etcd.Watch
+SIDE-EFFECT:
+  - WHEN: 'caching is disabled'
+    MUST: 'skip watching with a warning'
+  - MUST: 'run at most one watcher per config'
+  - WHEN: 'a set event arrives'
+    MUST: 'decode the value and store it under the prefix-stripped key'
+    USES: 10-etcd3@ValueEncoding
+  - WHEN: 'a single-key delete event arrives'
+    MUST: 'drop that cache key'
+  - WHEN: 'a directory delete covers the whole namespace and clearing is allowed'
+    MUST: 'empty the entire cache'
+  - WHEN: 'a directory delete covers the whole namespace and clearing is not allowed'
+    MUST: 'leave the cache unchanged'
+  - MUST-NOT: 'store a cache entry for a key outside the namespace'
+  - MUST: 'stop the watcher when the config is closed'
+    SEE: Config.Close
+---
+spec: Config.Close
+SIDE-EFFECT:
+  - MUST: 'stop the watcher without closing other cluster connections'
+  - MUST: 'succeed when called twice'
+---
+spec: toxin.Reload
+INPUT:
+  - MUST: 'take a clear flag'
+SIDE-EFFECT:
+  - WHEN: 'the clear flag is set'
+    MUST: 'wipe the settings before loading'
+  - MUST: 'load the configuration anew'
+    SEE: Config.Load
+---
+spec: toxin.ReloadHook
+INPUT:
+  - MUST: 'take a function of no arguments and register it for every subsequent load'
+  - MUST: 'call the hooks in registration order'
+  - MUST-NOT: 'pass arguments to a hook, because hooks run bare on every load'
+  - MUST-NOT: 'provide a way to unregister a hook, because hooks stay live for the process lifetime'
+---
+spec: toxin.Default
+RETURN:
+  - MUST: 'return one process-wide Config shared by every caller in the process'
+  - MUST: 'construct and load it on first use rather than at package initialization'
+  - MUST: 'expose package-level Get, Set, GetStrict and Clear that operate on the shared instance'
+    SEE: Config.Get
+  - MUST: 'expose package-level reload and reload hook registration that operate on the shared instance'
+    SEE: toxin.Reload
+---
+spec: toxin.FileCache
+INPUT:
+  - MUST: 'name the cache file from the prefix with leading and trailing slashes trimmed, ".." collapsed to "-", and a ".json" extension, keeping interior prefix slashes as directory separators nested under the configured cache directory'
+SIDE-EFFECT:
+  - MUST: 'create the nested prefix directories when saving'
+  - MUST: 'write the cache map as JSON on save'
+  - MUST: 'fill cache entries only for keys not already present, so freshly loaded values win'
+ERROR:
+  - WHEN: 'the cache file cannot be written on save'
+    MUST: 'fail with the error "Could not write toxin cache: <cause>"'
+  - WHEN: 'the cache file exists but cannot be read'
+    MUST: 'fail with the error "Could not read toxin cache: <cause>"'
+  - WHEN: 'no cache file exists'
+    MUST: 'report no cached data without error'
+---
+spec: toxin.Env
+INPUT:
+  - MUST: 'check the environment variable named by the key first, then the setting named by the lowercased dotted form of the key, then the given default'
+  - MUST: 'expose the mapping from setting name to variable name as its companion helper'
+    SEE: toxin.EnvKey
+---
+spec: toxin.EnvKey
+RETURN:
+  - MUST: 'form the variable name by uppercasing the setting name and replacing dots with underscores'
+  - MUST: 'return the variable''s value, or the default when the variable is unset'

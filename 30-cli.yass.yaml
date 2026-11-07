@@ -1,0 +1,177 @@
+# yaml-language-server: $schema=https://shakefu.github.io/yass/v1.schema.json
+---
+description: >
+  The toxin command line tool. With no subcommand it is the pyconfig-style
+  scanner: it parses Go source for toxin calls and reports the keys and
+  defaults they define. With a subcommand it is the jetconfig-style etcd
+  manager: get, set, dump, list, clear and load against a namespace.
+version: v1
+---
+spec: cli.Main
+INPUT:
+  - MUST: 'take the global option --version'
+  - WHEN: 'a subcommand is given'
+    MUST: 'take -n/--no-inherit and -v/--verbose as global options usable repeatedly'
+  - WHEN: 'no subcommand is given'
+    MUST: 'take -v and -n as the scanner display flags --view-call and --natural-sort'
+    SEE: cli.Scan
+  - WHEN: 'the first positional operand is a subcommand'
+    MUST: 'dispatch to that subcommand'
+  - WHEN: 'no subcommand is given and -f or -m is present'
+    MUST: 'run the source scanner'
+    SEE: cli.Scan
+  - WHEN: 'the subcommand is `get`'
+    MUST: 'dispatch to the get command'
+    SEE: cli.Get
+  - WHEN: 'the subcommand is `set`'
+    MUST: 'dispatch to the set command'
+    SEE: cli.Set
+  - WHEN: 'the subcommand is `dump`'
+    MUST: 'dispatch to the dump command'
+    SEE: cli.Dump
+  - WHEN: 'the subcommand is `list`'
+    MUST: 'dispatch to the list command'
+    SEE: cli.List
+  - WHEN: 'the subcommand is `clear`'
+    MUST: 'dispatch to the clear command'
+    SEE: cli.Clear
+  - WHEN: 'the subcommand is `load`'
+    MUST: 'dispatch to the load command'
+    SEE: cli.Load
+  - WHEN: 'a subcommand is given and -v is repeated'
+    MUST: 'lower the log level one step per repeat from critical toward silly and hold it at silly'
+  - WHEN: 'a subcommand is given and -n is passed'
+    MUST: 'construct the configuration with inheritance disabled'
+RETURN:
+  - WHEN: '--help or -h is given'
+    MUST: 'print the general usage, or the usage of the named command, and exit zero'
+  - WHEN: '--version is given'
+    MUST: 'print the version and exit zero'
+  - MUST: 'print usage as "Usage: toxin <command> [options]" followed by each command name with a one-line help and the global options'
+ERROR:
+  - WHEN: 'the first positional operand names no command'
+    MUST: 'print "toxin: no such command ''<name>''" to stderr and exit one'
+  - WHEN: 'no command and no scanner target is given'
+    MUST: 'print "command argument is required" with the usage to stderr and exit one'
+  - WHEN: 'a command''s required positional argument is missing'
+    MUST: 'print "<argument> argument is required" with the command usage to stderr and exit one'
+  - WHEN: 'an unknown flag, including a scanner-only flag, is given in command mode'
+    MUST: 'print the parse error and the usage to stderr and exit two'
+INVARIANT:
+  - MUST: 'resolve --help or -h before --version, and --version before subcommand dispatch'
+---
+spec: cli.Scan
+INPUT:
+  - MUST: 'take -f/--filename naming a file or directory, and -m/--module naming a Go package import path, as mutually exclusive targets'
+  - MUST: 'take the display flags -v/--view-call, -l/--load-configs, -a/--all, -k/--only-keys, -n/--natural-sort, -s/--source and -c/--color'
+  - MUST: 'treat -a and -k as mutually exclusive'
+  - WHEN: '-s is given'
+    MUST: 'sort naturally as with -n'
+  - WHEN: 'the target is a directory'
+    MUST: 'walk it recursively for files ending in ".go"'
+  - MUST: 'parse each file and record every package-qualified call to toxin.Get, toxin.Set or toxin.GetStrict with its method, literal key argument, literal default arguments, filename, line and column'
+  - WHEN: 'the key argument is a bare identifier'
+    MUST: 'display it as the identifier'
+  - WHEN: 'the key argument is any other non-literal expression'
+    MUST: 'take the argument expression text from the source and display it wrapped in angle brackets'
+RETURN:
+  - WHEN: '--all is not given'
+    MUST: 'omit a recorded call that carries no default when another recorded call for the same key carries one'
+  - MUST: 'emit one line per remaining recorded call, newline-terminated, with values rendered in Go literal syntax'
+  - MUST: 'default to the namespace view "key = default"'
+  - MUST: 'render an absent default as "<not set>" and an unreadable default as "<unparsed>"'
+  - WHEN: '--view-call is given'
+    MUST: 'emit the call as written, like toxin.Get("key", default)'
+  - WHEN: '--only-keys is given'
+    MUST: 'emit each distinct key once with no value'
+  - WHEN: '--all is given'
+    MUST: 'also emit calls whose key has a call with a default elsewhere'
+  - MUST: 'sort output alphabetically by key, or by filename then line when -n or -s is given'
+  - WHEN: 'the target is a file or a module'
+    MUST: 'show filenames relative to the target''s containing directory'
+  - WHEN: 'the target is a directory'
+    MUST: 'show filenames relative to the target directory''s parent'
+  - WHEN: '--source is given'
+    MUST: 'prepend "# <file>, line <n>" above each call'
+  - WHEN: '--source and --load-configs are given'
+    MUST: 'prepend "# Loaded config" above keys appended from the configuration'
+  - WHEN: '--load-configs is given'
+    MUST: 'load the process-wide default configuration, print each found key''s current value in its place, and append keys that exist only in the configuration'
+    SEE: 20-api@toxin.Default
+  - WHEN: 'a found key''s current value is falsy'
+    MUST: 'print the call''s default in its place, or "<not set>" when the call carries no default'
+  - MUST: 'colorize output as Go syntax by default, with -c toggling the setting off'
+ERROR:
+  - WHEN: 'the module cannot be resolved to source'
+    MUST: 'print "Could not load module or package: <module>" to stderr and exit one'
+  - WHEN: 'the module resolves to no readable source'
+    MUST: 'print "Could not determine module source: <module>" to stderr and exit one'
+  - WHEN: 'the target is neither a file nor a directory'
+    MUST: 'print "Could not determine file type: <path>" to stderr and exit one'
+  - WHEN: 'no calls are found in any parsed file'
+    MUST: 'print "No toxin calls." to stderr and exit one'
+  - WHEN: 'a file fails to parse'
+    MUST: 'skip it silently'
+  - WHEN: 'an unknown flag is given or the exclusive flags combine'
+    MUST: 'print the parse error and the usage to stderr and exit two'
+---
+spec: cli.Get
+INPUT:
+  - MUST: 'take prefix and key as positional arguments, both required'
+  - MUST: 'construct a Config on the prefix under the global options'
+RETURN:
+  - MUST: 'print the value returned for the key as two-space indented JSON'
+    SEE: 20-api@Config.Get
+ERROR:
+  - WHEN: 'the key is unset'
+    MUST: 'exit one without printing anything'
+---
+spec: cli.Set
+INPUT:
+  - MUST: 'take prefix, key and value as positional arguments, all required'
+  - MUST: 'construct a Config on the prefix under the global options'
+SIDE-EFFECT:
+  - MUST: 'set the key to the value'
+    SEE: 20-api@Config.Set
+RETURN:
+  - MUST: 'print nothing on success'
+---
+spec: cli.Dump
+INPUT:
+  - MUST: 'take a prefix positional argument defaulting to "config/"'
+RETURN:
+  - MUST: 'print the configuration dump as two-space indented JSON'
+    SEE: 20-api@Config.Dump
+---
+spec: cli.List
+INPUT:
+  - MUST: 'take a prefix positional argument defaulting to "/"'
+  - MUST: 'list with dirOnly false'
+RETURN:
+  - MUST: 'print the immediate children of the prefix, leaves and directories alike, as two-space indented JSON'
+    SEE: 20-api@Config.List
+---
+spec: cli.Clear
+INPUT:
+  - MUST: 'take a required prefix positional argument and an optional second positional argument'
+  - MUST: 'construct a Config on the prefix with clearing enabled'
+RETURN:
+  - WHEN: 'the second positional argument is present'
+    MUST: 'print the JSON object with member "error" holding "You forgot a slash didn''t you?" as two-space indented JSON and exit zero'
+SIDE-EFFECT:
+  - WHEN: 'only the prefix is given'
+    MUST: 'clear the namespace'
+    SEE: 20-api@Config.Clear
+---
+spec: cli.Load
+INPUT:
+  - MUST: 'take prefix and file as positional arguments, both required'
+  - MUST: 'read the file as JSON'
+SIDE-EFFECT:
+  - MUST: 'load the file''s configuration into the namespace, writing it through to etcd'
+    SEE: 20-api@Config.Load
+ERROR:
+  - WHEN: 'the file cannot be found'
+    MUST: 'print "No such file: <file>" to stderr and exit one'
+  - WHEN: 'the file cannot be parsed'
+    MUST: 'print the parse error to stderr and exit one'
