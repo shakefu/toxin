@@ -1,0 +1,6 @@
+{
+  "loaded.string": "value",
+  "nested": {
+    "key": true
+  }
+}
