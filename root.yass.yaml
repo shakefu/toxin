@@ -1,0 +1,80 @@
+# yaml-language-server: $schema=https://shakefu.github.io/yass/v1.schema.json
+---
+description: >
+  toxin is a Go port of pyconfig (Python) and jetconfig (Node.js):
+  configuration stored in an etcd v3 cluster under a namespace prefix,
+  addressed by dot-notation keys, case-insensitive by default, with
+  JSON-typed values, configuration inheritance, watching, and a command
+  line tool. The library API owns 20-api, the etcd v3 wire behavior owns
+  10-etcd3, and the command line tool owns 30-cli.
+version: v1
+---
+design: EnvNaming
+type: table
+content: |
+  toxin's own runtime configuration — the variables below — comes from
+  the process environment, named with a TOXIN_ prefix. Each variable,
+  its meaning, and its default:
+
+    TOXIN_ETCD           Comma-separated etcd member list; each entry is
+                         host[:port], optionally prefixed scheme:// and
+                         user:password@. Overrides programmatic hosts.
+                         (from PYCONFIG_ETCD_HOSTS, JETCONFIG_ETCD)
+    TOXIN_PREFIX         Namespace prefix for keys; default "config/".
+                         (from PYCONFIG_ETCD_PREFIX)
+    TOXIN_SSL_CA         CA certificate file path; the file may hold
+                         concatenated PEM certificates.
+                         (from JETCONFIG_SSL_CA, PYCONFIG_ETCD_CACERT)
+    TOXIN_SSL_CERT       Client certificate file path.
+                         (from JETCONFIG_SSL_CERT, PYCONFIG_ETCD_CERT)
+    TOXIN_SSL_KEY        Client key file path.
+                         (from JETCONFIG_SSL_KEY, PYCONFIG_ETCD_KEY)
+    TOXIN_AUTH           Basic auth credentials "username:password".
+                         (from PYCONFIG_ETCD_AUTH)
+    TOXIN_LOGLEVEL       One of silly, debug, info, warn, critical;
+                         default critical. (from JETCONFIG_LOGLEVEL)
+    TOXIN_CACHE          Directory for the file cache.
+                         (from JETCONFIG_CACHE)
+    TOXIN_WATCH          Any non-empty value enables watching.
+                         (from PYCONFIG_ETCD_WATCH)
+    TOXIN_INHERIT_DEPTH  Maximum inheritance depth; default 2.
+                         (from PYCONFIG_INHERIT_DEPTH)
+
+  An environment variable set to the empty string reads as unset, except
+  TOXIN_WATCH, where any non-empty value is truthy.
+
+  Per-setting environment overrides are not runtime configuration and
+  carry no TOXIN_ prefix: toxin.Env checks the setting name uppercased
+  with dots replaced by underscores.
+---
+spec: toxin
+INPUT:
+  - MUST: 'accept configuration access from Go programs through the public library API'
+    SEE: 20-api@toxin.New
+  - MUST: 'offer a process-wide shared configuration behind package-level functions'
+    SEE: 20-api@toxin.Default
+  - MUST: 'resolve a setting from an environment variable before the configuration before a default'
+    SEE: 20-api@toxin.Env
+  - MUST: 'accept shell invocation of the toxin binary, which dispatches between a source-scanning mode and etcd management subcommands'
+    SEE: 30-cli@cli.Main
+  - MUST: 'address settings by dot-notation keys resolved under a namespace prefix'
+    USES: 10-etcd3@EtcdKeys
+RETURN:
+  - MUST: 'yield values decoded from JSON storage, falling back to the raw stored string when it is not valid JSON'
+    USES: 10-etcd3@ValueEncoding
+  - MUST: 'return a caller-supplied default when a key is unset'
+ERROR:
+  - MUST: 'surface etcd failures to library callers as errors, and to command line users as a message on stderr with exit status one'
+SIDE-EFFECT:
+  - MUST: 'store and read configuration in an etcd v3 cluster, version 3.3 or newer, over gRPC'
+  - MUST-NOT: 'read or write any etcd key outside the configured namespace prefix'
+INVARIANT:
+  - USES: EnvNaming
+  - USES: 10-etcd3@ValueEncoding
+  - USES: 10-etcd3@EtcdKeys
+  - USES: 20-api@Inheritance
+  - WHEN: 'case sensitivity is not enabled at construction'
+    MUST: 'treat keys as case-insensitive, lowercasing them for storage and lookup'
+  - WHEN: 'case sensitivity is enabled at construction'
+    MUST: 'preserve key case through storage and lookup'
+  - MUST-NOT: 'execute code found in any configuration source, because configuration is data'

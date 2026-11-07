@@ -1,0 +1,155 @@
+# yaml-language-server: $schema=https://shakefu.github.io/yass/v1.schema.json
+---
+description: >
+  How toxin interacts with etcd v3: the key and value forms that cross the
+  boundary, and the observable behavior of the client, reads, writes,
+  deletes, watches, and error shapes. Ported from jetconfig 3.0.0, which
+  speaks the etcd v3 gRPC API against servers 3.3 or newer.
+version: v1
+---
+design: EtcdKeys
+type: constraint
+content: |
+  Keys crossing the etcd boundary use a slash-directory form:
+
+  - Normalize a key by stripping every leading '/' and prepending exactly
+    one; the empty key names the root '/'.
+  - A read or delete address additionally trims trailing '/' characters,
+    keeping the root '/'.
+  - A dot-notation setting key K under prefix P names the etcd key P + K in
+    this slash form; the prefix is a directory name with a trailing slash,
+    so prefix "config/" with key "app.setting" names "/config/app.setting".
+  - Children of a key K live strictly below "K/"; a range over K never
+    matches a key that merely shares K as a string prefix: "/config" never
+    matches "/configuration".
+  - Keys are UTF-8 strings; the empty prefix trims to the root "/".
+---
+design: ValueEncoding
+type: constraint
+content: |
+  Values cross the boundary as UTF-8 strings carrying JSON-typed data:
+
+  - A written value that is a string is stored verbatim; any other value is
+    stored as its JSON encoding.
+  - A read value is parsed as JSON; a value that fails to parse is
+    delivered as the raw string.
+  - Numbers, booleans, null, arrays and objects survive a write-read cycle
+    intact; a plain string that is not valid JSON comes back as itself.
+  - Both the library API and the command line tool exchange values in this
+    form, so a value written by one reads back identically in the other.
+---
+spec: etcd.Client
+INPUT:
+  - MUST: 'accept a member list as a single comma-separated string or a list of member strings'
+  - MUST: 'trim surrounding whitespace from each member and drop entries that trim to nothing'
+  - WHEN: '`TOXIN_ETCD` is set'
+    MUST: 'use it in place of any programmatic member list'
+    USES: root@EnvNaming
+  - MUST: 'treat an absent member list as the single member 127.0.0.1:2379'
+  - MUST: 'accept each member as `host`, `host:port`, `scheme://host:port`, or `scheme://user:password@host:port`'
+  - MUST: 'default the scheme of a member without one to http, or to https when TLS material is configured'
+  - WHEN: 'a member or `TOXIN_AUTH` carries user:password credentials'
+    MUST: 'use them for basic authentication'
+    USES: root@EnvNaming
+  - WHEN: '`TOXIN_AUTH` carries no colon'
+    MUST: 'log a warning and ignore the incomplete credentials'
+    USES: root@EnvNaming
+  - MUST: 'load the contents of `TOXIN_SSL_CA`, `TOXIN_SSL_CERT` and `TOXIN_SSL_KEY` as the TLS credentials when set, concatenating multiple CA certificates with newlines'
+    USES: root@EnvNaming
+RETURN:
+  - MUST: 'yield a client that holds the resolved member list and credentials and serves every read, write, delete and watch'
+ERROR:
+  - WHEN: 'a member matches none of `host`, `host:port`, `scheme://host:port`, or `scheme://user:password@host:port`'
+    MUST: 'reject with an error naming the member'
+INVARIANT:
+  - MUST: 'carry a five second deadline on every single-request call'
+  - MUST: 'retry a timed-out call, about three attempts in total, so an unreachable cluster surfaces failure after roughly fifteen seconds rather than five'
+---
+spec: etcd.Error
+INPUT:
+  - MUST: 'take any failure raised by the cluster or the transport'
+RETURN:
+  - WHEN: 'a read or a delete finds nothing'
+    MUST: 'produce a not-found error whose message is "Key not found", whose error code is one hundred, and whose cause is the addressed key'
+  - MUST: 'carry the failure''s message unchanged with its detail string as the cause'
+---
+spec: etcd.Read
+INPUT:
+  - MUST: 'take a key in the slash-directory form and a recursive flag'
+    USES: EtcdKeys
+RETURN:
+  - WHEN: 'the key itself holds a value and either the recursive flag is unset or no entries exist below it'
+    MUST: 'return the exact stored entry'
+  - WHEN: 'the recursive flag is set and entries exist below the key'
+    MUST: 'return every entry strictly below "key/", dropping the key''s own value when it holds one'
+  - WHEN: 'the recursive flag is unset and the key itself holds no value but entries exist below it'
+    MUST: 'return the immediate children of the key, one path segment deeper'
+  - MUST: 'order multiple returned entries by creation revision, breaking ties by lexicographic key order'
+  - WHEN: 'the key is the root and nothing is stored'
+    MUST: 'return an empty listing rather than an error'
+ERROR:
+  - WHEN: 'nothing matches and the key is not the root'
+    MUST: 'signal not-found'
+    CONFORMS: etcd.Error
+INVARIANT:
+  - MUST-NOT: 'let a subtree read match a key that merely shares the addressed key as a string prefix'
+    USES: EtcdKeys
+---
+spec: etcd.Put
+INPUT:
+  - MUST: 'take a key in the slash-directory form'
+    USES: EtcdKeys
+  - MUST: 'take a UTF-8 string value already encoded per the value rules, and an optional ttl of one second or more'
+    USES: ValueEncoding
+RETURN:
+  - MUST: 'return the revision the write landed on'
+SIDE-EFFECT:
+  - MUST: 'store the value under the key verbatim'
+  - WHEN: 'a ttl is given'
+    MUST: 'grant a fresh one-shot lease of that many seconds with no keepalive, so the key expires that long after its most recent write'
+  - WHEN: 'no ttl is given'
+    MUST: 'detach the key from any lease it held'
+---
+spec: etcd.Delete
+INPUT:
+  - MUST: 'take a key in the slash-directory form and a recursive flag'
+    USES: EtcdKeys
+RETURN:
+  - MUST: 'return the revision and the count of entries deleted'
+SIDE-EFFECT:
+  - WHEN: 'the recursive flag is unset'
+    MUST: 'delete the exact key only'
+  - WHEN: 'the recursive flag is set and the key is not the root'
+    MUST: 'delete the exact key and everything below "key/" in a single transaction that lands on one revision'
+  - WHEN: 'the recursive flag is set and the key is the root'
+    MUST: 'delete the entire keyspace in one range delete'
+ERROR:
+  - WHEN: 'the count of deleted entries is zero'
+    MUST: 'signal not-found'
+    CONFORMS: etcd.Error
+---
+spec: etcd.Watch
+INPUT:
+  - MUST: 'take a key and a recursive flag defaulting to true'
+  - MAY: 'accept a start revision to resume from'
+SIDE-EFFECT:
+  - WHEN: 'the recursive flag is unset'
+    MUST: 'watch the exact key instead of the prefix'
+  - WHEN: 'the recursive flag is set'
+    MUST: 'watch the normalized key as a prefix without trimming its trailing slash, so events on the watched key itself are delivered when it carries no trailing slash and are not delivered when it carries one'
+    USES: EtcdKeys
+  - MUST: 'deliver events in revision order'
+  - WHEN: 'a value is put'
+    MUST: 'deliver a set event naming the key and carrying the value'
+  - WHEN: 'exactly one key is deleted in a revision'
+    MUST: 'deliver a delete event naming that key'
+  - WHEN: 'several keys are deleted within one revision'
+    MUST: 'coalesce them into a single directory delete event naming the watched root'
+  - MUST-NOT: 'deliver events for keys outside the slash boundary of the watched root'
+ERROR:
+  - WHEN: 'the stream disconnects'
+    MUST: 'signal reconnect without scheduling a retry'
+  - WHEN: 'creating the watch fails or the server cancels the watch'
+    MUST: 'signal reconnect and retry with a delay of six hundred milliseconds doubling per attempt, capped at five seconds'
+  - WHEN: 'the server cancels the watch'
+    MUST: 're-establish it from the current revision'
