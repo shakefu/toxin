@@ -48,6 +48,24 @@ func TestGetUnsetKeyExitsOneSilently(t *testing.T) {
 	}
 }
 
+// root@toxin::INVARIANT: etcd failures surface to command line users as a
+// message on stderr with exit status one. TOXIN_ETCD points at a loopback
+// port nothing answers on, so the subcommand's cluster is unreachable.
+func TestEtcdFailurePrintsToStderrAndExitsOne(t *testing.T) {
+	t.Setenv("TOXIN_ETCD", "127.0.0.1:1")
+
+	out, errOut, code := runCLI("get", "cfg/", "key")
+	if code != 1 {
+		t.Fatalf("get against a dead cluster: exit code %d, stderr %q", code, errOut)
+	}
+	if out != "" {
+		t.Errorf("stdout = %q, wanted none", out)
+	}
+	if !strings.Contains(errOut, "context deadline exceeded") {
+		t.Errorf("stderr = %q, wanted the etcd failure naming the deadline", errOut)
+	}
+}
+
 // cli.Get RETURN: a key stored as JSON null prints as null — a found
 // value, distinct from the unset case's silent exit one.
 func TestGetPrintsStoredNullAsNull(t *testing.T) {
