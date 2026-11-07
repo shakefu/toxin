@@ -2,6 +2,7 @@ package toxin
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -267,6 +268,49 @@ func TestGetTreatsMissingEntryAsUnsetValueWithWarning(t *testing.T) {
 	}
 	if buf.Len() == 0 {
 		t.Error("no warning logged for a response carrying no entry")
+	}
+}
+
+// 20-api@Config.Get::ERROR: an etcd read failure other than not-found is
+// returned to the caller by the strict variant too.
+func TestGetStrictSurfacesEtcdReadFailure(t *testing.T) {
+	c := newTestConfig(t, WithPrefix("get-strict-fail/"))
+	if err := c.client.Close(); err != nil {
+		t.Fatalf("closing the client: %v", err)
+	}
+
+	_, err := c.GetStrict("app.key")
+	if err == nil {
+		t.Fatal("GetStrict succeeded against a closed cluster, want the etcd failure")
+	}
+	var etcdErr *etcd.Error
+	if !errors.As(err, &etcdErr) {
+		t.Errorf("error %q is not shaped as an etcd failure", err)
+	}
+}
+
+// 20-api@Config.Get::ERROR: the etcd response carries no entry — here the
+// directory-key shape, entries below the key with none matching the key
+// itself — so the key is treated as unset with a logged warning and the
+// default returns. (A dot is not a path separator in the key form —
+// "app.x" lives beside "app", not below it — so the child is stored with a
+// slash.)
+func TestGetTreatsDirectoryKeyAsUnsetValueWithWarning(t *testing.T) {
+	c := newTestConfig(t, WithPrefix("get-dirkey/"))
+	if err := c.Set("app/leaf", "v"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	buf := captureLog(c)
+
+	got, err := c.Get("app", "fallback")
+	if err != nil {
+		t.Fatalf("Get of a directory key errored: %v", err)
+	}
+	if got != "fallback" {
+		t.Errorf("Get of a directory key = %v, want the default %q", got, "fallback")
+	}
+	if !strings.Contains(buf.String(), "Key not found: /get-dirkey/app") {
+		t.Errorf("warning %q does not treat the directory key as unset", buf.String())
 	}
 }
 

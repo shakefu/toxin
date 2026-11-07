@@ -1,6 +1,7 @@
 package toxin
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/shakefu/toxin/internal/etcd"
@@ -97,5 +98,27 @@ func TestClearCacheOnlyEmptiesCacheWithoutEtcd(t *testing.T) {
 	}
 	if _, ok := rawGet(t, raw, "/clear-only/app.key"); !ok {
 		t.Error("Clear(cacheOnly) deleted from etcd, want the cache only")
+	}
+}
+
+// root@toxin::INVARIANT: etcd failures surface to library callers as
+// errors — an etcd delete failure other than not-found is returned by
+// Clear, not treated as the already-empty namespace.
+func TestClearSurfacesEtcdDeleteFailure(t *testing.T) {
+	c := newTestConfig(t, WithPrefix("clear-fail/"), WithAllowClear(true))
+	if err := c.Set("app.key", "v"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	if err := c.client.Close(); err != nil {
+		t.Fatalf("closing the client: %v", err)
+	}
+
+	err := c.Clear()
+	if err == nil {
+		t.Fatal("Clear succeeded against a closed cluster, want the etcd failure")
+	}
+	var etcdErr *etcd.Error
+	if !errors.As(err, &etcdErr) {
+		t.Errorf("error %q is not shaped as an etcd failure", err)
 	}
 }

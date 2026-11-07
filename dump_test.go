@@ -1,6 +1,7 @@
 package toxin
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/shakefu/toxin/internal/etcd"
@@ -103,5 +104,24 @@ func TestDumpNeverMatchesMereStringPrefixes(t *testing.T) {
 		if key == "outside" || key == "outside2" {
 			t.Errorf("dump matched a key beyond the slash boundary: %v", dump)
 		}
+	}
+}
+
+// root@toxin::INVARIANT: etcd failures surface to library callers as
+// errors — an etcd read failure other than not-found is returned by Dump,
+// not rendered as the not-found outcome.
+func TestDumpSurfacesEtcdReadFailure(t *testing.T) {
+	c := newTestConfig(t, WithPrefix("dump-fail/"))
+	if err := c.client.Close(); err != nil {
+		t.Fatalf("closing the client: %v", err)
+	}
+
+	_, err := c.Dump()
+	if err == nil {
+		t.Fatal("Dump succeeded against a closed cluster, want the etcd failure")
+	}
+	var etcdErr *etcd.Error
+	if !errors.As(err, &etcdErr) {
+		t.Errorf("error %q is not shaped as an etcd failure", err)
 	}
 }

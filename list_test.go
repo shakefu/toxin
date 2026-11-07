@@ -1,8 +1,11 @@
 package toxin
 
 import (
+	"errors"
 	"sort"
 	"testing"
+
+	"github.com/shakefu/toxin/internal/etcd"
 )
 
 // buildListTree stores a small namespace tree through the raw client:
@@ -81,5 +84,24 @@ func TestListNothingUnderNamespaceReturnsEmptyList(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Errorf("List of an empty namespace = %v, want an empty list", got)
+	}
+}
+
+// root@toxin::INVARIANT: etcd failures surface to library callers as
+// errors — an etcd read failure other than not-found is returned by List,
+// not answered as the empty list.
+func TestListSurfacesEtcdReadFailure(t *testing.T) {
+	c := newTestConfig(t, WithPrefix("list-fail/"))
+	if err := c.client.Close(); err != nil {
+		t.Fatalf("closing the client: %v", err)
+	}
+
+	_, err := c.List("")
+	if err == nil {
+		t.Fatal("List succeeded against a closed cluster, want the etcd failure")
+	}
+	var etcdErr *etcd.Error
+	if !errors.As(err, &etcdErr) {
+		t.Errorf("error %q is not shaped as an etcd failure", err)
 	}
 }
