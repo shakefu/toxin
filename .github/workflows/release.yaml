@@ -1,0 +1,473 @@
+# Release-on-merge pipeline adapted from the common-repo/semantic-release
+# template (cocogitto bump + tag + GitHub Release). Identity is
+# github-actions[bot] via the workflow's own token — no GitHub App needed.
+name: Release
+
+on:
+    workflow_dispatch:
+        inputs:
+            version:
+                description: >-
+                    Explicit version to release, e.g. 1.2.3 (no leading v). Leave blank
+                    to plan the version from conventional commits.
+                required: false
+                type: string
+    push:
+        branches:
+            - main
+
+permissions:
+    contents: write
+
+concurrency:
+    group: release
+    cancel-in-progress: false
+
+env:
+    COCOGITTO_VERSION: "7.0.0"
+
+jobs:
+    ci:
+        name: CI
+        permissions:
+            contents: read
+        uses: ./.github/workflows/ci.yaml
+        secrets: inherit
+
+    # Releases may only ever be published from the default branch. The push
+    # trigger is already scoped to main; this keeps a manual workflow_dispatch
+    # from another branch from publishing a version that never lands there.
+    # CI still runs for those dispatches.
+    release:
+        name: Release
+        needs: ci
+        # A gate without a status function is an implicit success(), which
+        # GitHub re-evaluates to false on cancellation and cancels the whole job,
+        # so the rollback step below would never run. always() keeps the job
+        # alive on cancel; the publication steps' implicit success() then skips
+        # them and only the rollback runs.
+        if: always() && needs.ci.result == 'success' && github.ref == 'refs/heads/main'
+        permissions:
+            contents: write
+        runs-on: ubuntu-latest
+        outputs:
+            is-release: ${{ steps.plan.outputs.is-release }}
+            version: ${{ steps.plan.outputs.version }}
+            tag: ${{ steps.plan.outputs.tag }}
+        steps:
+            # The default token carries the job's contents: write permission
+            # and pushes to this repo as github-actions[bot].
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  fetch-depth: 0
+                  persist-credentials: true
+
+            - name: Install cocogitto
+              run: |
+                  set -euo pipefail
+                  asset="cocogitto-${COCOGITTO_VERSION}-x86_64-unknown-linux-musl.tar.gz"
+                  url="https://github.com/cocogitto/cocogitto/releases/download/${COCOGITTO_VERSION}/${asset}"
+                  tmp="$(mktemp -d)"
+                  curl -fsSL -o "${tmp}/${asset}" "${url}"
+                  tar -xzf "${tmp}/${asset}" -C "${tmp}"
+                  sudo install -m 0755 "${tmp}"/*/cog /usr/local/bin/cog
+                  cog --version
+
+            # Static identity: github-actions[bot] is the well-known bot user
+            # behind every workflow token, so commits and tags are attributed
+            # to the actor that is actually pushing them.
+            - name: Configure git identity
+              run: |
+                  set -euo pipefail
+                  git config user.name  "github-actions[bot]"
+                  git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+            # Optional consumer hook: an executable script/release-setup prepares
+            # the toolchain the plan and the pre_bump_hooks need (runtimes, package
+            # managers, registry auth). It can export to later steps through
+            # $GITHUB_PATH and $GITHUB_ENV.
+            - name: Prepare release environment
+              run: |
+                  set -euo pipefail
+                  if [[ -x script/release-setup ]]; then
+                      script/release-setup
+                  fi
+
+            # An off-main version tag might be an interrupted release or an
+            # intentional release from another branch. Never delete either its tag
+            # or published assets automatically. Older tags superseded by the
+            # newest reachable release do not affect the next version. A manually
+            # supplied version is checked against all remote tags in the plan step.
+            # Prerelease and other suffixed tags are not release tags and are ignored.
+            - name: Check for unreconciled release tags
+              if: inputs.version == ''
+              run: |
+                  set -euo pipefail
+                  # Plain vX.Y.Z only: this workflow cuts no other tags, and sort -V
+                  # ranks a prerelease such as v1.2.0-rc.1 above v1.2.0.
+                  release_tags() {
+                      git tag --list 'v[0-9]*.[0-9]*.[0-9]*' "$@" | { grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true; }
+                  }
+                  latest="$(release_tags --merged HEAD | sed 's/^v//' | sort -V | tail -n 1)"
+                  for tag in $(release_tags); do
+                      if git merge-base --is-ancestor "${tag}^{commit}" HEAD; then
+                          continue
+                      fi
+                      version="${tag#v}"
+                      if [[ -n "${latest}" ]] && [[ "$(printf '%s\n' "${latest}" "${version}" | sort -V | tail -n 1)" != "${version}" ]]; then
+                          echo "::notice::${tag} is off main but superseded by reachable v${latest}; keeping it"
+                          continue
+                      fi
+                      echo "::error::${tag} is not reachable from main and is not superseded. Automatic version planning stopped. Nothing was deleted."
+                      echo "::error::Inspect its tag target and GitHub release. After maintainer review, dispatch a new version higher than all remote tags, or have an authorized maintainer remove an orphaned release and tag before retrying."
+                      exit 1
+                  done
+
+            # A dispatched `version` input wins; it must not already be tagged,
+            # since rollback would take the existing tag for this run's. Otherwise
+            # an executable script/plan-release decides: it must write is-release,
+            # and when true version and tag, to $GITHUB_OUTPUT, and the version
+            # must be the one `cog bump --auto` computes (it gates, it does not
+            # pick versions).
+            # Dry-run to decide whether this push warrants a release. cog exits 0 in
+            # both "bump planned" and "no bump needed" cases, distinguished by whether
+            # stdout contains a semver. A non-zero exit means a real error (dirty
+            # tree, git failure, etc.) and should fail the workflow loudly. All
+            # subsequent release steps are gated on `is-release == 'true'`.
+            - name: Plan next version
+              id: plan
+              env:
+                  EVENT_NAME: ${{ github.event_name }}
+                  EXPLICIT_VERSION: ${{ inputs.version }}
+              run: |
+                  # Plain X.Y.Z only: the major-tag step would move vN onto a prerelease.
+                  semver='^[0-9]+\.[0-9]+\.[0-9]+$'
+                  if [[ -n "${EXPLICIT_VERSION:-}" ]]; then
+                      if [[ ! "${EXPLICIT_VERSION}" =~ ${semver} ]]; then
+                          echo "::error::version input must be X.Y.Z (no leading v, no prerelease or build suffix), got '${EXPLICIT_VERSION}'"
+                          exit 1
+                      fi
+                      # --exit-code: 0 = tag exists, 2 = no such tag, anything else = lookup failed.
+                      tag_check=0
+                      git ls-remote --exit-code --tags origin "refs/tags/v${EXPLICIT_VERSION}" >/dev/null || tag_check=$?
+                      if [[ ${tag_check} -eq 0 ]]; then
+                          echo "::error::v${EXPLICIT_VERSION} is already released; dispatch a version that has no tag yet"
+                          exit 1
+                      elif [[ ${tag_check} -ne 2 ]]; then
+                          echo "::error::could not check origin for v${EXPLICIT_VERSION} (git ls-remote exited ${tag_check})"
+                          exit 1
+                      fi
+                      # A version below the latest release would move the major tag
+                      # backward onto it, downgrading consumers that follow vN.
+                      if ! remote_tags="$(git ls-remote --tags --refs origin 'refs/tags/v*')"; then
+                          echo "::error::could not list release tags on origin"
+                          exit 1
+                      fi
+                      latest="$(printf '%s\n' "${remote_tags}" | sed -n 's|.*refs/tags/v||p' \
+                          | { grep -E "${semver}" || true; } | sort -V | tail -n 1)"
+                      if [[ -n "${latest}" ]] && [[ "$(printf '%s\n%s\n' "${latest}" "${EXPLICIT_VERSION}" | sort -V | tail -n 1)" != "${EXPLICIT_VERSION}" ]]; then
+                          echo "::error::v${EXPLICIT_VERSION} is lower than the latest release v${latest}; dispatch a higher version"
+                          exit 1
+                      fi
+                      echo "Explicit version requested: v${EXPLICIT_VERSION}"
+                      {
+                          echo "is-release=true"
+                          echo "version=${EXPLICIT_VERSION}"
+                          echo "tag=v${EXPLICIT_VERSION}"
+                      } >> "${GITHUB_OUTPUT}"
+                      exit 0
+                  fi
+
+                  if [[ -x script/plan-release ]]; then
+                      script/plan-release
+                      exit 0
+                  fi
+
+                  set +e
+                  plan_output="$(cog bump --auto --dry-run 2>&1)"
+                  plan_exit=$?
+                  set -e
+
+                  printf '%s\n' "${plan_output}"
+
+                  if [[ ${plan_exit} -ne 0 ]]; then
+                      echo "::error::cog bump --dry-run exited ${plan_exit}"
+                      exit "${plan_exit}"
+                  fi
+
+                  version="$(printf '%s' "${plan_output}" \
+                      | grep -oE '[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?' \
+                      | tail -n 1 || true)"
+
+                  if [[ -z "${version}" ]]; then
+                      echo "::notice::No release warranted from recent commits."
+                      echo "is-release=false" >> "${GITHUB_OUTPUT}"
+                      exit 0
+                  fi
+
+                  echo "Planned release: v${version}"
+                  {
+                      echo "is-release=true"
+                      echo "version=${version}"
+                      echo "tag=v${version}"
+                  } >> "${GITHUB_OUTPUT}"
+
+            # Runs any `pre_bump_hooks` configured in cog.toml (artifact builds,
+            # registry pushes, in-tree version stamps, etc). Hooks receive `{{version}}`
+            # as the planned version. After the hooks, cog stages every change
+            # (`git add --all`, which honors .gitignore), so files the hooks write
+            # enter the bump commit; keep release assets that must stay out of it
+            # in an ignored directory such as dist/. The resulting commit + tag stay
+            # local — we push them in a controlled order below.
+            - name: Bump (commit + tag, local only)
+              if: steps.plan.outputs.is-release == 'true'
+              env:
+                  EXPLICIT_VERSION: ${{ inputs.version }}
+              run: |
+                  set -euo pipefail
+                  if [[ -n "${EXPLICIT_VERSION:-}" ]]; then
+                      cog bump --version "${EXPLICIT_VERSION}"
+                  else
+                      cog bump --auto
+                  fi
+
+            # The bump commit can carry formatting that the pre-commit hooks would
+            # change: cog's initial CHANGELOG.md has no final newline, and
+            # pre_bump_hooks can write files of their own. Run the formatting
+            # hooks, normalize the changelog, and amend the bump commit if anything
+            # changed.
+            - name: Install prek
+              if: steps.plan.outputs.is-release == 'true'
+              uses: j178/prek-action@44924fe9ef4a6f88253c4b6b1bf11c689d3ce53d # v3.1.0
+              with:
+                  install-only: "true"
+
+            # Only run hooks that are safe in a generic release workflow — i.e.
+            # don't require pre-installed language toolchains (Python, Node, Go,
+            # etc.). That means the prek/pre-commit builtins that fix formatting,
+            # plus markdownlint if the consumer happens to use it. Unknown hook
+            # IDs are swallowed by `|| true` so consumers without a given hook
+            # just skip it.
+            #
+            # The hooks here exclude CHANGELOG.md (and the other generated files)
+            # so that generated output does not fail the Lint check; they never
+            # touch the file that cog writes. cog's initial CHANGELOG.md has no
+            # final newline, and later bumps keep the ending of the file, so
+            # without this step the file never gets one. Normalize the changelog
+            # here with Python: remove trailing whitespace, keep a Markdown hard
+            # line break (two or more trailing spaces, kept as two), and end the
+            # file with one newline. The path is `changelog.path` from cog.toml,
+            # read with tomllib (Python 3.11 or later; ubuntu-latest has 3.12),
+            # in any TOML form, with CHANGELOG.md as the default. cog staged the
+            # hook outputs before the bump commit, so the only changes here are
+            # edits to tracked files: restage them with `git add -u`.
+            - name: Fix bump formatting
+              if: steps.plan.outputs.is-release == 'true'
+              env:
+                  TAG: ${{ steps.plan.outputs.tag }}
+              run: |
+                  set -euo pipefail
+                  hooks=(
+                      trailing-whitespace
+                      end-of-file-fixer
+                      fix-byte-order-marker
+                      mixed-line-ending
+                      markdownlint
+                      markdownlint-cli2
+                  )
+                  for hook in "${hooks[@]}"; do
+                      prek run --all-files "${hook}" || true
+                  done
+                  python3 - <<'PY'
+                  import pathlib
+                  import tomllib
+
+                  path = "CHANGELOG.md"
+                  try:
+                      with open("cog.toml", "rb") as f:
+                          section = tomllib.load(f).get("changelog")
+                          if isinstance(section, dict) and isinstance(section.get("path"), str):
+                              path = section["path"]
+                  except (OSError, tomllib.TOMLDecodeError):
+                      pass
+                  changelog = pathlib.Path(path)
+                  if changelog.is_file():
+                      lines = []
+                      for line in changelog.read_text().split("\n"):
+                          stripped = line.rstrip()
+                          tail = line[len(stripped):]
+                          hard_break = bool(stripped) and len(tail) >= 2 and tail == " " * len(tail)
+                          lines.append(stripped + "  " if hard_break else stripped)
+                      changelog.write_text("\n".join(lines).rstrip("\n") + "\n")
+                  PY
+                  if ! git diff --quiet; then
+                      git add -u
+                      git commit --amend --no-edit
+                      git tag -f "${TAG}"
+                  fi
+
+            # The tag, the release, and the major tag are published before the bump
+            # commit reaches the remote, so a merge to the branch during the run
+            # would strand all three on a commit that never lands. Refuse to publish
+            # unless the remote tip is still the commit we checked out; the run
+            # queued behind this one for the newer commit performs the release.
+            - name: Verify branch has not advanced
+              if: steps.plan.outputs.is-release == 'true'
+              env:
+                  BRANCH: ${{ github.ref_name }}
+                  SHA: ${{ github.sha }}
+              run: |
+                  set -euo pipefail
+                  git fetch origin "${BRANCH}"
+                  if [ "$(git rev-parse "origin/${BRANCH}")" != "${SHA}" ]; then
+                      echo "::error::origin/${BRANCH} moved during the release run; not publishing. The queued run for the newer commit will release it."
+                      exit 1
+                  fi
+
+            # Push the tag first so the remote has the commit SHA the release will
+            # target. Doing this before pushing the bump commit to the default branch
+            # is what lets us avoid races with VCS-driven consumers (Terraform Cloud,
+            # Argo CD, etc.) that react to commits on main and expect the artifact to
+            # already exist at the tagged version.
+            - name: Push tag
+              if: steps.plan.outputs.is-release == 'true'
+              env:
+                  TAG: ${{ steps.plan.outputs.tag }}
+              run: git push origin "refs/tags/${TAG}"
+
+            - name: Generate changelog
+              if: steps.plan.outputs.is-release == 'true'
+              id: changelog
+              env:
+                  TAG: ${{ steps.plan.outputs.tag }}
+              run: |
+                  set -euo pipefail
+                  notes="$(cog changelog --at "${TAG}")"
+                  {
+                      echo 'notes<<COCOGITTO_NOTES_EOF'
+                      printf '%s\n' "${notes}"
+                      echo 'COCOGITTO_NOTES_EOF'
+                  } >> "${GITHUB_OUTPUT}"
+
+            # Create the GitHub release (non-draft) and attach any files staged by
+            # pre-bump hooks in ./dist. For consumers that don't produce artifacts,
+            # ./dist won't exist and the release is created with just the changelog.
+            - name: Create GitHub release
+              if: steps.plan.outputs.is-release == 'true'
+              env:
+                  GH_TOKEN: ${{ github.token }}
+                  TAG: ${{ steps.plan.outputs.tag }}
+                  NOTES: ${{ steps.changelog.outputs.notes }}
+              run: |
+                  set -euo pipefail
+                  shopt -s nullglob
+                  assets=(dist/*)
+                  shopt -u nullglob
+                  gh release create "${TAG}" \
+                      --title "${TAG}" \
+                      --notes "${NOTES}" \
+                      "${assets[@]}"
+
+            # Capture the major tag's previous SHA before force-updating it so the
+            # rollback step below can restore it if a later step fails.
+            - name: Update major version tag
+              if: steps.plan.outputs.is-release == 'true'
+              id: major
+              env:
+                  VERSION: ${{ steps.plan.outputs.version }}
+              run: |
+                  set -euo pipefail
+                  major="v${VERSION%%.*}"
+                  prev="$(git ls-remote origin "refs/tags/${major}" | head -n1 | cut -f1)"
+                  git tag -f "${major}"
+                  {
+                      echo "name=${major}"
+                      echo "prev=${prev}"
+                      echo "new=$(git rev-parse "${major}")"
+                  } >> "${GITHUB_OUTPUT}"
+                  git push origin "refs/tags/${major}" --force
+
+            # Final step: push the bump commit to the default branch. Anything that
+            # reacts to this commit (TF Cloud, Argo CD, webhooks) will now find the
+            # tag, the GitHub release, and any attached assets already in place.
+            - name: Push bump commit
+              if: steps.plan.outputs.is-release == 'true'
+              env:
+                  BRANCH: ${{ github.ref_name }}
+              run: git push origin "HEAD:${BRANCH}"
+
+            # A failure or cancellation after the tag reached the remote would leave the
+            # tag, the release, and the major tag published on a commit that never
+            # lands on the branch — and the next run unable to plan the same
+            # version. Undo what this run published, and only that: if the bump
+            # commit already reached the branch despite the reported failure, the
+            # release is complete; and a remote tag pointing anywhere else was
+            # never this run's to delete.
+            - name: Roll back published release artifacts
+              if: (failure() || cancelled()) && steps.plan.outputs.is-release == 'true'
+              env:
+                  GH_TOKEN: ${{ github.token }}
+                  BRANCH: ${{ github.ref_name }}
+                  TAG: ${{ steps.plan.outputs.tag }}
+                  MAJOR: ${{ steps.major.outputs.name }}
+                  MAJOR_PREV: ${{ steps.major.outputs.prev }}
+                  MAJOR_NEW: ${{ steps.major.outputs.new }}
+              run: |
+                  set -euo pipefail
+                  # HEAD is the bump commit once `cog bump` ran. A reported-failure
+                  # push may still have landed, and a merge can advance the branch
+                  # past the bump commit before this rollback runs, so decide by
+                  # reachability, not tip equality. A fetch failure aborts the
+                  # rollback: failing closed leaves artifacts in place rather than
+                  # deleting a live release.
+                  git fetch origin "${BRANCH}"
+                  if git merge-base --is-ancestor HEAD "origin/${BRANCH}"; then
+                      echo "::notice::The bump commit is on origin/${BRANCH}; the release is complete, not rolling back."
+                      exit 0
+                  fi
+                  # The remote tag can only match this run's local tag if this run
+                  # pushed it: the bump commit exists nowhere else, so a tag that
+                  # predates the run or was pushed by another actor points elsewhere
+                  # and is left alone. The release names that tag, so the same check
+                  # covers it — including a release left half-created when
+                  # `gh release create` failed mid-upload.
+                  local_tag="$(git rev-parse "${TAG}" 2>/dev/null || true)"
+                  remote_tag="$(git ls-remote origin "refs/tags/${TAG}" | head -n1 | cut -f1)"
+                  # The tag goes only once no release names it: deleting it under a
+                  # release that failed to delete would orphan that release.
+                  release_kept=false
+                  if [ -n "${local_tag}" ] && [ "${local_tag}" = "${remote_tag}" ]; then
+                      if view_err="$(gh release view "${TAG}" --json tagName 2>&1 >/dev/null)"; then
+                          if ! gh release delete "${TAG}" --yes; then
+                              echo "::error::Could not delete release ${TAG}; leaving the release and its tag in place."
+                              release_kept=true
+                          fi
+                      elif [[ "${view_err}" != *"release not found"* ]]; then
+                          echo "::error::Could not look up release ${TAG} (${view_err}); leaving the release and its tag in place."
+                          release_kept=true
+                      fi
+                      if [ "${release_kept}" = false ]; then
+                          git push origin ":refs/tags/${TAG}" || true
+                      fi
+                  else
+                      echo "::notice::origin does not carry this run's ${TAG}; leaving the remote tag and release untouched."
+                  fi
+                  # The major tag is only this run's to undo while the remote still
+                  # points at the SHA this run pushed: if the update never landed, or
+                  # another actor moved the tag afterwards, the remote differs and is
+                  # left alone. A prev equal to new means the tag already pointed
+                  # here before the run, so restoring would be a no-op push.
+                  if [ -n "${MAJOR}" ] && [ -n "${MAJOR_NEW}" ]; then
+                      remote_major="$(git ls-remote origin "refs/tags/${MAJOR}" | head -n1 | cut -f1)"
+                      if [ "${remote_major}" != "${MAJOR_NEW}" ]; then
+                          echo "::notice::origin ${MAJOR} does not point at this run's update; leaving the major tag untouched."
+                      elif [ -n "${MAJOR_PREV}" ] && [ "${MAJOR_PREV}" != "${MAJOR_NEW}" ]; then
+                          git push origin --force "${MAJOR_PREV}:refs/tags/${MAJOR}"
+                      elif [ -z "${MAJOR_PREV}" ]; then
+                          git push origin ":refs/tags/${MAJOR}" || true
+                      fi
+                  fi
+                  if [ "${release_kept}" = true ]; then
+                      echo "::error::Delete release ${TAG} and then tag ${TAG} by hand before re-running."
+                      exit 1
+                  fi
