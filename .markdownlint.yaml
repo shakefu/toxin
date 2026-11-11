@@ -1,0 +1,10 @@
+line-length:
+  tables: false
+  # Code samples can't obey prose width: Go struct tags and long
+  # signatures are single-line by nature.
+  code_blocks: false
+
+# Keep hard tabs legal inside fenced code (gofmt output); prose still
+# can't use them.
+no-hard-tabs:
+  code_blocks: false
