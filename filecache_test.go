@@ -24,6 +24,7 @@ func TestFileCacheNamesCacheFileFromPrefix(t *testing.T) {
 		{"/config/", filepath.Join(dir, "config.json")},
 		{"app/db/", filepath.Join(dir, "app", "db.json")},
 		{"config/../app/", filepath.Join(dir, "config", "-", "app.json")},
+		{"/", filepath.Join(dir, ".json")},
 	}
 	for _, tc := range cases {
 		fc := NewFileCache(tc.prefix, dir)
