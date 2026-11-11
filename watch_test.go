@@ -133,6 +133,40 @@ func TestWatchDirectoryDeleteEmptiesCacheWhenClearingAllowed(t *testing.T) {
 	})
 }
 
+// 20-api@Config.Watch::SIDE-EFFECT: a directory delete of a single
+// subdirectory — several keys of that subdirectory deleted within one
+// revision — empties the entire cache when clearing is allowed,
+// including entries outside the deleted subdirectory: jetconfig's
+// documented over-invalidation.
+func TestWatchSubdirectoryDeleteEmptiesEntireCacheWhenClearingAllowed(t *testing.T) {
+	raw := newRawClient(t)
+	c := newTestConfig(t, WithPrefix("watch-subdir/"), WithAllowClear(true))
+	t.Cleanup(func() { _ = c.Close() })
+	c.Watch()
+	ensureWatching(t, raw, c, "watch-subdir/")
+
+	// Two keys under the subdirectory destined for deletion, and one
+	// under a sibling subdirectory the delete never touches.
+	rawPut(t, raw, "/watch-subdir/sub/one", "1")
+	rawPut(t, raw, "/watch-subdir/sub/two", "2")
+	rawPut(t, raw, "/watch-subdir/other/keep", "3")
+	waitFor(t, 10*time.Second, "all three watched keys to reach the cache", func() bool {
+		a, _ := c.Get("sub/one", nil, CacheOnly(true))
+		b, _ := c.Get("sub/two", nil, CacheOnly(true))
+		k, _ := c.Get("other/keep", nil, CacheOnly(true))
+		return a != nil && b != nil && k != nil
+	})
+
+	// A recursive delete of the one subdirectory lands on a single
+	// revision, coalescing into a directory delete event.
+	if _, _, err := raw.Delete(t.Context(), "/watch-subdir/sub", true); err != nil {
+		t.Fatalf("raw recursive delete of the subdirectory: %v", err)
+	}
+	waitFor(t, 10*time.Second, "the subdirectory delete to empty the entire cache", func() bool {
+		return len(c.cacheSnapshot()) == 0
+	})
+}
+
 // 20-api@Config.Watch::SIDE-EFFECT: a directory delete covering the whole
 // namespace leaves the cache unchanged when clearing is not allowed.
 func TestWatchDirectoryDeleteLeavesCacheWhenClearingNotAllowed(t *testing.T) {
