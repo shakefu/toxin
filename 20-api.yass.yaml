@@ -10,7 +10,7 @@ description: >
 version: v1
 ---
 design: Inheritance
-type: ordered-rules
+type: procedure
 content: |
   A configuration may inherit from a parent configuration:
 
