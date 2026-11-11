@@ -7,33 +7,50 @@ repos `../pyconfig` and `../jetconfig`.
 
 ## Layout
 
-- `root.yass.yaml` — project spec; read it first. Owns the `EnvNaming` design (every `TOXIN_*` environment variable).
-- `10-etcd3.yass.yaml` — external etcd v3 behavior: key and value forms, client, reads, writes, deletes, watches, error shapes.
-- `20-api.yass.yaml` — public Go API: `Config`, Get/Set/Dump/Load/List/Clear/Watch, reload hooks, default instance, file cache.
-- `30-cli.yass.yaml` — the `toxin` binary: Go source-scanner mode and etcd management subcommands.
-- Root package (`*.go` at the repo root) — the public API of `20-api`: `Config`, construction and per-call options, the default instance.
+- `root.yass.yaml` — project spec; read it first. Owns the `EnvNaming`
+  design (every `TOXIN_*` environment variable).
+- `10-etcd3.yass.yaml` — external etcd v3 behavior: keys and values,
+  client, reads, writes, deletes, watches, error shapes.
+- `20-api.yass.yaml` — public Go API: `Config`, Get/Set/Dump/Load/List/
+  Clear/Watch, reload hooks, default instance, file cache.
+- `30-cli.yass.yaml` — the `toxin` binary: Go source-scanner mode and
+  etcd management subcommands.
+- Root package (`*.go` at the repo root) — the public API of `20-api`:
+  `Config`, construction and per-call options, the default instance.
 - `cmd/toxin` — the binary's `main`; version is set at link time.
 - `internal/etcd` — the etcd v3 client layer behind `10-etcd3`.
-- `internal/cli` — the scanner and the six management subcommands behind `30-cli`, on venom.
+- `internal/cli` — the scanner and the six management subcommands behind
+  `30-cli`, on venom.
 - `internal/log` — the levelled logger behind `TOXIN_LOGLEVEL`.
-- `internal/testutil` — the shared testcontainers etcd container the tests run against.
+- `internal/testutil` — the shared testcontainers etcd container the
+  tests run against.
+- `script/` — scripts-to-rule-them-all harness: thin stubs run drop-ins
+  from `script/.<phase>/`; machinery adapted from `textla/cr-golang` and
+  its common-repo upstreams, not consumed through common-repo.
 
 Numeric file prefixes are implementation order: etcd3 layer, then API,
 then CLI.
 
 ## Required
 
-- Specs must pass `yass validate` and `yass lint`; a change that breaks either is not done.
-- New behavior lands in the spec set with, not after, the code that implements it.
+- Specs must pass `yass validate` and `yass lint`; a change that breaks
+  either is not done.
+- New behavior lands in the spec set with, not after, the code that
+  implements it.
+- Commits follow Conventional Commits; merging a `feat:` or `fix:` to
+  `main` releases via cocogitto (`release.yaml`).
 
 ## Commands
 
 ```sh
-yass list                  # every document in the spec set
-yass query root@toxin      # one spec, references resolved
-yass find PATTERN          # search obligation prose
-yass validate && yass lint # the gates
-go test ./...              # needs Docker; testcontainers-go starts a real etcd
+script/test          # yass gates, go test (Docker: testcontainers starts
+                     # a real etcd), gofmt and go vet
+script/setup         # prek install; checks yass is on PATH
+script/server        # local etcd on 127.0.0.1:2379
+script/console -- -h # the toxin CLI against local etcd
+yass list            # every document in the spec set
+yass query root@toxin # one spec, references resolved
+yass find PATTERN    # search obligation prose
 ```
 
 ## Maintaining this index

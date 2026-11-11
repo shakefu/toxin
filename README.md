@@ -133,11 +133,28 @@ name (`my.database.host` → `MY_DATABASE_HOST`).
 ## Development
 
 ```sh
-go test ./...        # needs Docker running
-yass validate && yass lint
+script/setup          # prek install; checks yass is on PATH
+script/test           # yass gates + go test (needs Docker) + gofmt/vet
+script/server         # local etcd on 127.0.0.1:2379
+script/console -- -h  # the toxin CLI against local etcd
 ```
+
+`script/` follows the
+[scripts-to-rule-them-all](https://github.com/github/scripts-to-rule-them-all)
+pattern: thin stubs run drop-ins from `script/.<phase>/`. The machinery is
+adapted from [textla/cr-golang](https://github.com/textla/cr-golang) and
+its common-repo upstreams (scripts-to-rule-them-all, semantic-release),
+carried in this repo directly rather than consumed through common-repo.
 
 Tests never run against a mock: testcontainers-go launches a real etcd v3
 container, one per test binary, and the first run pulls the image. The
 yass spec set (`*.yass.yaml`) is the behavior contract; a change that
 breaks `yass validate` or `yass lint` is not done.
+
+[prek](https://github.com/j178/prek) runs the pre-commit hooks: go
+tidy/fmt/vulncheck, markdownlint, shellcheck, shfmt, actionlint, zizmor,
+and conventional-commit enforcement. Commits follow [Conventional
+Commits](https://www.conventionalcommits.org/); merging a `feat:` or
+`fix:` to `main` cuts a release automatically (cocogitto, see
+`.github/workflows/release.yaml`). The repo has no release tag yet — cut
+the first one by dispatching that workflow with an explicit version.
