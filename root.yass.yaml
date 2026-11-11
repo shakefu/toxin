@@ -10,7 +10,7 @@ description: >
 version: v1
 ---
 design: EnvNaming
-type: table
+type: constraint
 content: |
   toxin's own runtime configuration — the variables below — comes from
   the process environment, named with a TOXIN_ prefix. Each variable,
