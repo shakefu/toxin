@@ -74,7 +74,7 @@ RETURN:
   - WHEN: 'caching is enabled and the key is in the cache'
     MUST: 'return the cached value without contacting etcd'
   - WHEN: 'cacheOnly is set and the key is not in the cache'
-    MUST: 'return the default without contacting etcd'
+    MUST: 'return the default without contacting etcd or storing anything in the cache'
   - WHEN: 'cacheOnly is set and caching is disabled, by construction or for the call'
     MUST: 'return the default without contacting etcd'
   - WHEN: 'etcd holds the key'
@@ -83,7 +83,7 @@ RETURN:
   - WHEN: 'etcd does not hold the key, inheritance is allowed, and the call is not cacheOnly'
     MUST: 'consult the inherited chain before falling back'
     USES: Inheritance
-  - WHEN: 'the key is unset and a default is given'
+  - WHEN: 'the key is unset, a default is given, and the call is not cacheOnly'
     MUST: 'return the default and store it in the cache unless cacheResult is false'
   - WHEN: 'the strict variant finds the key unset'
     MUST: 'return the error ''No setting "<key>"'''
@@ -124,7 +124,7 @@ RETURN:
     USES: Inheritance
 ERROR:
   - WHEN: 'no entry exists under the prefix and the prefix is not the root'
-    MUST: 'return the not-found error rendered as ''Key not found: /<prefix>'''
+    MUST: 'return the not-found error rendered as ''Key not found: <addressed key>'', the prefix in slash form with its trailing slash trimmed'
     CONFORMS: 10-etcd3@etcd.Error
 ---
 spec: Config.Load
@@ -201,9 +201,9 @@ SIDE-EFFECT:
     USES: 10-etcd3@ValueEncoding
   - WHEN: 'a single-key delete event arrives'
     MUST: 'drop that cache key'
-  - WHEN: 'a directory delete covers the whole namespace and clearing is allowed'
-    MUST: 'empty the entire cache'
-  - WHEN: 'a directory delete covers the whole namespace and clearing is not allowed'
+  - WHEN: 'a directory delete event arrives and clearing is allowed'
+    MUST: 'empty the entire cache regardless of how much of the namespace the deleted keys covered'
+  - WHEN: 'a directory delete event arrives and clearing is not allowed'
     MUST: 'leave the cache unchanged'
   - MUST-NOT: 'store a cache entry for a key outside the namespace'
   - MUST: 'stop the watcher when the config is closed'
@@ -241,7 +241,9 @@ RETURN:
 ---
 spec: toxin.FileCache
 INPUT:
-  - MUST: 'name the cache file from the prefix with leading and trailing slashes trimmed, ".." collapsed to "-", and a ".json" extension, keeping interior prefix slashes as directory separators nested under the configured cache directory'
+  - MUST: 'name the cache file from the prefix with leading and trailing slashes trimmed, each occurrence of ".." replaced by "-" without touching the slashes around it, and a ".json" extension, keeping interior prefix slashes as directory separators nested under the configured cache directory'
+  - WHEN: 'the prefix is the root "/"'
+    MUST: 'name the cache file ".json" directly under the cache directory'
 SIDE-EFFECT:
   - MUST: 'create the nested prefix directories when saving'
   - MUST: 'write the cache map as JSON on save'

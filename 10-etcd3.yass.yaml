@@ -54,7 +54,7 @@ INPUT:
   - WHEN: '`TOXIN_AUTH` carries no colon'
     MUST: 'log a warning and ignore the incomplete credentials'
     USES: root@EnvNaming
-  - MUST: 'load the contents of `TOXIN_SSL_CA`, `TOXIN_SSL_CERT` and `TOXIN_SSL_KEY` as the TLS credentials when set, concatenating multiple CA certificates with newlines'
+  - MUST: 'load the contents of `TOXIN_SSL_CA`, `TOXIN_SSL_CERT` and `TOXIN_SSL_KEY` as the TLS credentials when set, concatenating the contents of the comma-separated `TOXIN_SSL_CA` paths with newlines'
     USES: root@EnvNaming
 RETURN:
   - MUST: 'yield a client that holds the resolved member list and credentials and serves every read, write, delete and watch'
@@ -106,7 +106,7 @@ RETURN:
 SIDE-EFFECT:
   - MUST: 'store the value under the key verbatim'
   - WHEN: 'a ttl is given'
-    MUST: 'grant a fresh one-shot lease of that many seconds with no keepalive, so the key expires that long after its most recent write'
+    MUST: 'grant a fresh one-shot lease of that many seconds with no keepalive, so the key expires after its most recent write when the granted lease runs out, because the server may round a granted lease up to its minimum'
   - WHEN: 'no ttl is given'
     MUST: 'detach the key from any lease it held'
 ---
@@ -147,7 +147,7 @@ SIDE-EFFECT:
     MUST: 'coalesce them into a single directory delete event naming the watched root'
   - MUST-NOT: 'deliver events for keys outside the slash boundary of the watched root'
 ERROR:
-  - WHEN: 'the stream disconnects'
+  - WHEN: 'the connection to the cluster drops'
     MUST: 'signal reconnect without scheduling a retry'
   - WHEN: 'creating the watch fails or the server cancels the watch'
     MUST: 'signal reconnect and retry with a delay of six hundred milliseconds doubling per attempt, capped at five seconds'
