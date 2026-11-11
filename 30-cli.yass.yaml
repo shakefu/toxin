@@ -62,7 +62,7 @@ INVARIANT:
 ---
 spec: cli.Scan
 INPUT:
-  - MUST: 'take -f/--filename naming a file or directory, and -m/--module naming a Go package import path, as mutually exclusive targets'
+  - MUST: 'take -f/--filename naming a file or directory, and -m/--module naming a Go package import path or package directory, as mutually exclusive targets'
   - MUST: 'take the display flags -v/--view-call, -l/--load-configs, -a/--all, -k/--only-keys, -n/--natural-sort, -s/--source and -c/--color'
   - MUST: 'treat -a and -k as mutually exclusive'
   - WHEN: '-s is given'
@@ -102,9 +102,9 @@ RETURN:
     MUST: 'print the call''s default in its place, or "<not set>" when the call carries no default'
   - MUST: 'colorize output as Go syntax by default, with -c toggling the setting off'
 ERROR:
-  - WHEN: 'the module cannot be resolved to source'
+  - WHEN: 'the go tool fails or reports the module unresolvable'
     MUST: 'print "Could not load module or package: <module>" to stderr and exit one'
-  - WHEN: 'the module resolves to no readable source'
+  - WHEN: 'the go tool resolves the module to a directory it reports as holding no Go files'
     MUST: 'print "Could not determine module source: <module>" to stderr and exit one'
   - WHEN: 'the target is neither a file nor a directory'
     MUST: 'print "Could not determine file type: <path>" to stderr and exit one'
@@ -119,11 +119,15 @@ spec: cli.Get
 INPUT:
   - MUST: 'take prefix and key as positional arguments, both required'
   - MUST: 'construct a Config on the prefix under the global options'
+  - MUST: 'read the key through the strict variant'
+    SEE: 20-api@Config.Get
 RETURN:
   - MUST: 'print the value returned for the key as two-space indented JSON'
     SEE: 20-api@Config.Get
+  - WHEN: 'the key stores JSON null'
+    MUST: 'print null'
 ERROR:
-  - WHEN: 'the key is unset'
+  - WHEN: 'the strict variant finds the key unset'
     MUST: 'exit one without printing anything'
 ---
 spec: cli.Set

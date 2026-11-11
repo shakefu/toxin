@@ -22,8 +22,8 @@ content: |
                          (from PYCONFIG_ETCD_HOSTS, JETCONFIG_ETCD)
     TOXIN_PREFIX         Namespace prefix for keys; default "config/".
                          (from PYCONFIG_ETCD_PREFIX)
-    TOXIN_SSL_CA         CA certificate file path; the file may hold
-                         concatenated PEM certificates.
+    TOXIN_SSL_CA         Comma-separated CA certificate file paths; each
+                         file may hold concatenated PEM certificates.
                          (from JETCONFIG_SSL_CA, PYCONFIG_ETCD_CACERT)
     TOXIN_SSL_CERT       Client certificate file path.
                          (from JETCONFIG_SSL_CERT, PYCONFIG_ETCD_CERT)
