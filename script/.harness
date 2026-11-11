@@ -1,0 +1,370 @@
+#!/usr/bin/env bash
+# script/.harness — pluggable runner for the scripts-to-rule-them-all pattern.
+#
+# Not user-facing. The thin stubs in script/ exec this with a phase name; it
+# discovers drop-ins in script/.<phase>/*.sh, validates them, and runs them
+# in sorted order with severity gating. See README.md for the specification.
+#
+# Requires bash (3.2+). Drop-ins may use the stdlib functions defined here:
+# info, debug, warn, error, pass, fail, soft_fail, skip.
+#
+# shellcheck disable=SC2329  # stdlib functions are invoked from drop-ins
+
+# Reserved outcome codes. Outcome functions print these to stdout; drop-ins
+# propagate with: return $(fail "message")
+RC_PASS=0
+RC_HARD=70
+RC_SOFT=75
+RC_SKIP=77
+
+# Deterministic glob expansion order (NN- prefixes assume byte sort). Not
+# exported: bash applies the locale change on plain assignment, but child
+# processes of drop-ins keep the user's locale.
+LC_ALL=C
+
+HARNESS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$HARNESS_DIR/.." && pwd)"
+
+# ---------------------------------------------------------------- stdlib --
+# Logging goes to stderr; stdout belongs to drop-ins. Outcome functions
+# print the reserved code to stdout and the message to stderr, because
+# command substitution in `return $(fail ...)` captures stdout only.
+
+info()  { printf '%s %s\n'    "${HARNESS_TAG:-script}" "$*" >&2; }
+debug() { [ -n "${DEBUG:-}" ] && printf '%s (debug) %s\n' "${HARNESS_TAG:-script}" "$*" >&2; return 0; }
+warn()  { printf '%s (warning) %s\n' "${HARNESS_TAG:-script}" "$*" >&2; }
+error() { printf '%s (error) %s\n' "${HARNESS_TAG:-script}" "$*" >&2; }
+
+pass()      { printf '%s pass: %s\n' "${HARNESS_TAG:-script}" "$*" >&2; echo "$RC_PASS"; }
+fail()      { printf '%s FAIL: %s\n' "${HARNESS_TAG:-script}" "$*" >&2; echo "$RC_HARD"; }
+soft_fail() { printf '%s fail (soft): %s\n' "${HARNESS_TAG:-script}" "$*" >&2; echo "$RC_SOFT"; }
+skip()      { printf '%s skip: %s\n' "${HARNESS_TAG:-script}" "$*" >&2; echo "$RC_SKIP"; }
+
+# ------------------------------------------------------------- machinery --
+
+usage() {
+  cat >&2 <<'EOF'
+usage: script/<phase> [--only <pattern>[,<pattern>...]] [--list] [--] [args...]
+
+Phases: bootstrap, setup, update, test, cibuild, server, console
+
+  --only   restrict to drop-ins whose stem matches exactly, either fully
+           qualified (30-lint) or by suffix without the NN- prefix (lint).
+           Multiple patterns allowed, comma-separated or repeated. Matching
+           drop-ins all run; zero matches is an error.
+  --list   print discovered drop-ins and exit without running anything.
+  args     everything else is passed through to every drop-in invoked.
+EOF
+}
+
+die() { error "$*"; exit 2; }
+
+# Resolve the severity declared in a drop-in header: `# severity: soft|hard`.
+# Empty output means no declaration (or an invalid one, which warns); the
+# phase default applies.
+header_severity() {
+  local _sev
+  _sev="$(sed -n 's/^[[:space:]]*#[[:space:]]*severity:[[:space:]]*//p' "$1" | head -n 1)"
+  case "$_sev" in
+    soft|hard) printf '%s\n' "$_sev" ;;
+    "")        ;;
+    *)         warn "invalid severity '$_sev' in ${1##*/} (expected soft or hard); using phase default" ;;
+  esac
+}
+
+phase_default_severity() {
+  case "$1" in
+    test|cibuild) echo soft ;;
+    *)            echo hard ;;
+  esac
+}
+
+is_provider_phase() {
+  case "$1" in server|console) return 0 ;; *) return 1 ;; esac
+}
+
+# matches_only <stem> <pattern>...: exact on the full stem, or exact on the
+# suffix after the NN- prefix.
+matches_only() {
+  local _stem="$1" _pat
+  shift
+  for _pat in "$@"; do
+    if [[ "$_stem" == "$_pat" || "$_stem" == ??-"$_pat" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+# phase_matches_only <phase> <pattern>...: true when any drop-in in
+# script/.<phase>/ matches one of the patterns.
+phase_matches_only() {
+  local _phase="$1" _f _stem _rc=1
+  shift
+  shopt -s nullglob
+  for _f in "$HARNESS_DIR/.$_phase"/*.sh; do
+    _stem="${_f##*/}"
+    if matches_only "${_stem%.sh}" "$@"; then
+      _rc=0
+      break
+    fi
+  done
+  shopt -u nullglob
+  return "$_rc"
+}
+
+main() {
+  local phase="${1:-}"
+  if [ -z "$phase" ]; then
+    usage
+    exit 2
+  fi
+  shift
+  ORIGINAL_ARGS=("$@")
+  # Ambient context for drop-ins: which phase is running
+  # shellcheck disable=SC2034  # read by drop-ins, not the harness
+  HARNESS_PHASE="$phase"
+  HARNESS_TAG="[$phase]"
+
+  case "$phase" in
+    bootstrap|setup|update|test|cibuild|server|console) ;;
+    *) die "unknown phase: $phase" ;;
+  esac
+
+  # -- arg parsing ----------------------------------------------------------
+  local only=() passthrough=() list=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --only)
+        [ $# -ge 2 ] || die "--only requires an argument"
+        local _parts _p _got=0
+        IFS=',' read -r -a _parts <<<"$2"
+        for _p in "${_parts[@]}"; do
+          [ -n "$_p" ] && only+=("$_p") && _got=1
+        done
+        [ "$_got" -eq 1 ] || die "--only requires a non-empty pattern"
+        shift 2
+        ;;
+      --only=*)
+        local _rhs="${1#--only=}" _parts _p _got=0
+        IFS=',' read -r -a _parts <<<"$_rhs"
+        for _p in "${_parts[@]}"; do
+          [ -n "$_p" ] && only+=("$_p") && _got=1
+        done
+        [ "$_got" -eq 1 ] || die "--only requires a non-empty pattern"
+        shift
+        ;;
+      --list)
+        list=1
+        shift
+        ;;
+      --)
+        shift
+        passthrough+=("$@")
+        break
+        ;;
+      *)
+        passthrough+=("$1")
+        shift
+        ;;
+    esac
+  done
+
+  # -- discovery --------------------------------------------------------------
+  DROP_FILES=()
+  DROP_STEMS=()
+  local f stem
+  shopt -s nullglob
+  for f in "$HARNESS_DIR/.$phase"/*.sh; do
+    DROP_FILES+=("$f")
+    stem="${f##*/}"
+    DROP_STEMS+=("${stem%.sh}")
+  done
+  shopt -u nullglob
+
+  # -- selection --------------------------------------------------------------
+  local selected=() i stem
+  for i in "${!DROP_STEMS[@]}"; do
+    stem="${DROP_STEMS[$i]}"
+    if [ "${#only[@]}" -eq 0 ] || matches_only "$stem" "${only[@]}"; then
+      selected+=("$i")
+    fi
+  done
+
+  if [ "$list" -eq 1 ]; then
+    local sev
+    for i in "${selected[@]}"; do
+      stem="${DROP_STEMS[$i]}"
+      sev="$(header_severity "${DROP_FILES[$i]}")"
+      [ -n "$sev" ] || sev="$(phase_default_severity "$phase") (default)"
+      printf '  %-24s %-16s %s\n' "$stem" "$sev" "${DROP_FILES[$i]}"
+    done
+    exit 0
+  fi
+
+  # -- cross-phase chaining (via the scripts, never the drop-ins directly) -----
+  # Runs before empty-phase handling so `update` still bootstraps even when
+  # script/.update/ has no drop-ins of its own. `--only` names this phase's
+  # drop-ins, so bootstrap runs in full and gets only the passthrough args.
+  case "$phase" in
+    setup|update)
+      if [ -x "$HARNESS_DIR/bootstrap" ]; then
+        "$HARNESS_DIR/bootstrap" -- "${passthrough[@]}" || exit $?
+      fi
+      ;;
+  esac
+
+  # cibuild finishes with the test script, and forwards its arguments to
+  # it. `--only` therefore filters across both phases: the test script is
+  # skipped when the filter matches nothing in script/.test/, and matching
+  # nothing in script/.cibuild/ is fine as long as script/.test/ matches.
+  local chain_test=0
+  if [ "$phase" = cibuild ] && [ -x "$HARNESS_DIR/test" ]; then
+    chain_test=1
+    if [ "${#only[@]}" -gt 0 ] && ! phase_matches_only test "${only[@]}"; then
+      chain_test=0
+    fi
+  fi
+
+  if [ "${#only[@]}" -gt 0 ] && [ "${#selected[@]}" -eq 0 ] && [ "$chain_test" -eq 0 ]; then
+    if [ "$phase" = cibuild ]; then
+      error "--only matched no drop-ins in script/.cibuild/ or script/.test/"
+    else
+      error "--only matched no drop-ins in script/.$phase/"
+    fi
+    [ "${#DROP_STEMS[@]}" -gt 0 ] && info "available: ${DROP_STEMS[*]}"
+    exit 2
+  fi
+
+  # -- empty phase semantics ---------------------------------------------------
+  if [ "${#DROP_FILES[@]}" -eq 0 ]; then
+    if is_provider_phase "$phase"; then
+      error "no $phase drop-in found in script/.$phase/ — a platform upstream should provide one"
+      exit 1
+    fi
+    debug "script/.$phase/ has no drop-ins"
+    # cibuild falls through: with nothing selected the steps below are
+    # no-ops until the test script is chained at the end.
+    [ "$chain_test" -eq 1 ] || exit 0
+  fi
+
+  if is_provider_phase "$phase" && [ "${#selected[@]}" -gt 1 ]; then
+    error "multiple $phase drop-ins match — exactly one provider may run:"
+    for i in "${selected[@]}"; do
+      info "  ${DROP_STEMS[$i]}"
+    done
+    exit 1
+  fi
+
+  # -- validation: syntax-check everything, then source what will run ----------
+  for f in "${DROP_FILES[@]}"; do
+    if ! bash -n "$f"; then
+      error "syntax error in $f"
+      exit 2
+    fi
+  done
+  for i in "${selected[@]}"; do
+    # shellcheck disable=SC1090
+    . "${DROP_FILES[$i]}"
+    stem="${DROP_STEMS[$i]}"
+    if [ "$(type -t "$stem")" != "function" ]; then
+      die "${DROP_FILES[$i]} must define a function named: $stem()"
+    fi
+  done
+
+  # -- execution ----------------------------------------------------------------
+  # invoke() runs one drop-in in a subshell with fail-fast: an unhandled
+  # failing command aborts the drop-in (set -e), and its status propagates
+  # out of the subshell without traps. Errors handled by the drop-in
+  # (if/||/&& contexts) behave as usual under set -e. Exported variables
+  # are the sharing channel: the subshell's final environment is captured
+  # on exit (EXIT trap) and re-sourced by the harness, so later drop-ins
+  # see it. Unset and non-exported variables do not propagate. Exports of
+  # the harness's own variables are dropped, so a drop-in cannot change
+  # its loop or results. Drop-ins run from the repo root; stdout/stderr
+  # pass straight through.
+  invoke() {
+    local _envf _rc
+    _envf="$(mktemp "${TMPDIR:-/tmp}/stra-env.XXXXXX")"
+    (
+      trap 'export -n $HARNESS_STATE_VARS; export -p >"$_envf"' EXIT
+      set -e
+      set -o pipefail
+      cd "$REPO_ROOT"
+      "$@"
+    )
+    _rc=$?
+    # Re-import the drop-in's exported environment. Sourced as `export`
+    # statements rather than `declare -x`: declare inside a function creates
+    # a function-local variable (bash < 4.2 has no `declare -g`), which
+    # would silently drop every export when invoke() returns.
+    # shellcheck disable=SC1090
+    if [ -s "$_envf" ]; then
+      eval "$(sed 's/^declare[[:space:]]*-x[[:space:]]\{1,\}/export /' "$_envf")"
+    fi
+    rm -f "$_envf"
+    cd "$REPO_ROOT" || die "cannot cd to $REPO_ROOT"
+    return "$_rc"
+  }
+
+  print_summary() {
+    local r
+    [ "${#RESULTS[@]}" -gt 0 ] || return 0
+    HARNESS_TAG="[$phase]"
+    info "summary:"
+    for r in "${RESULTS[@]}"; do
+      printf '  %s\n' "$r" >&2
+    done
+  }
+
+  local rc sev
+  HARNESS_STATE_VARS="phase only passthrough list f stem selected i sev rc r
+    chain_test _envf _rc _parts _p _got _rhs ORIGINAL_ARGS HARNESS_PHASE
+    HARNESS_TAG HARNESS_DIR REPO_ROOT DROP_FILES DROP_STEMS RESULTS FAILED
+    RC_PASS RC_HARD RC_SOFT RC_SKIP HARNESS_STATE_VARS"
+  RESULTS=()
+  FAILED=0
+  for i in "${selected[@]}"; do
+    stem="${DROP_STEMS[$i]}"
+    HARNESS_TAG="[$phase] $stem"
+    info "running"
+    invoke "$stem" "${passthrough[@]}"
+    rc=$?
+    set +e
+
+    if [ "$rc" -eq "$RC_PASS" ]; then
+      RESULTS+=("pass   $stem")
+    elif [ "$rc" -eq "$RC_SKIP" ]; then
+      RESULTS+=("skip   $stem")
+    elif [ "$rc" -eq "$RC_SOFT" ]; then
+      RESULTS+=("FAIL   $stem")
+      FAILED=1
+    elif [ "$rc" -eq "$RC_HARD" ]; then
+      RESULTS+=("FAIL   $stem")
+      print_summary
+      exit 1
+    else
+      sev="$(header_severity "${DROP_FILES[$i]}")"
+      [ -n "$sev" ] || sev="$(phase_default_severity "$phase")"
+      if [ "$sev" = hard ]; then
+        RESULTS+=("FAIL   $stem")
+        print_summary
+        exit 1
+      fi
+      RESULTS+=("FAIL   $stem")
+      FAILED=1
+    fi
+  done
+
+  # -- cibuild always finishes with the test script -----------------------------
+  if [ "$chain_test" -eq 1 ]; then
+    "$HARNESS_DIR/test" "${ORIGINAL_ARGS[@]}" || FAILED=1
+  elif [ "$phase" = cibuild ] && [ -x "$HARNESS_DIR/test" ]; then
+    debug "skipping script/test: --only matched no drop-ins in script/.test/"
+  fi
+
+  print_summary
+  exit "$FAILED"
+}
+
+main "$@"
