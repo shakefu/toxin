@@ -1,75 +1,82 @@
 minimum_prek_version: 0.3.8
 default_install_hook_types:
-    - pre-commit
-    - commit-msg
-
+- pre-commit
+- commit-msg
 repos:
-    - repo: https://github.com/compilerla/conventional-pre-commit
-      rev: v3.6.0
-      hooks:
-          - id: conventional-pre-commit
-            stages:
-                - commit-msg
-    - repo: builtin
-      hooks:
-          - id: trailing-whitespace
-            exclude: ^(CHANGELOG\.md)$
-          - id: check-added-large-files
-          - id: check-case-conflict
-          - id: end-of-file-fixer
-            exclude: ^(CHANGELOG\.md)$
-          - id: fix-byte-order-marker
-            exclude: ^(CHANGELOG\.md)$
-          - id: check-json
-            # testdata holds deliberately-malformed fixture inputs
-            exclude: ^internal/cli/testdata/
-          - id: check-json5
-          - id: check-toml
-          - id: check-yaml
-            args:
-                - --allow-multiple-documents
-          - id: check-merge-conflict
-          - id: check-xml
-          - id: mixed-line-ending
-            exclude: ^(CHANGELOG\.md)$
-          - id: check-symlinks
-          - id: detect-private-key
-          - id: check-executables-have-shebangs
-    - repo: https://github.com/tekwizely/pre-commit-golang
-      rev: v1.0.0-rc.4
-      hooks:
-          - id: go-mod-tidy
-          - id: go-fmt
-          - id: go-vulncheck-repo-mod
-            # scannermod is a scanner test fixture, not shipped code
-            args: ["--hook:ignore-dir=internal/cli/testdata"]
-    - repo: https://github.com/DavidAnson/markdownlint-cli2
-      rev: v0.18.1
-      hooks:
-          - id: markdownlint-cli2
-            args: ["--fix"]
-            files: ".*\\.(md|mdc)$"
-            exclude: ^(CHANGELOG\.md)$
-            additional_dependencies: ["markdownlint-cli2"]
-    - repo: https://github.com/shellcheck-py/shellcheck-py
-      rev: v0.10.0.1
-      hooks:
-          - id: shellcheck
-            args: ["-x"]
-            # .harness is upstream machinery, sourced by drop-ins shellcheck
-            # cannot see; its own repo lints it
-            exclude: ^script/\.harness$
-    - repo: https://github.com/scop/pre-commit-shfmt
-      rev: v3.10.0-1
-      hooks:
-          - id: shfmt
-            args: ["-i", "4", "-ci", "-bn"]
-    - repo: https://github.com/rhysd/actionlint
-      rev: v1.7.7
-      hooks:
-          - id: actionlint
-    - repo: https://github.com/zizmorcore/zizmor-pre-commit
-      rev: v1.13.0
-      hooks:
-          - id: zizmor
-            args: ["--min-severity", "high", "--min-confidence", "medium"]
+- repo: https://github.com/compilerla/conventional-pre-commit
+  rev: v3.6.0
+  hooks:
+  - id: conventional-pre-commit
+    stages:
+    - commit-msg
+- repo: builtin
+  hooks:
+  - id: trailing-whitespace
+    exclude: ^(CHANGELOG\.md|RELEASES\.md|CLAUDE\.md|AGENTS\.md|llms\.txt|\.claude/.*|\.cursor/.*|\.github/copilot-instructions\.md)$
+  - id: check-added-large-files
+  - id: check-case-conflict
+  - id: end-of-file-fixer
+    exclude: ^(CHANGELOG\.md|RELEASES\.md|CLAUDE\.md|AGENTS\.md|llms\.txt|\.claude/.*|\.cursor/.*|\.github/copilot-instructions\.md)$
+  - id: fix-byte-order-marker
+    exclude: ^(CHANGELOG\.md|RELEASES\.md|CLAUDE\.md|AGENTS\.md|llms\.txt|\.claude/.*|\.cursor/.*|\.github/copilot-instructions\.md)$
+  - id: check-json
+    exclude: ^internal/cli/testdata/
+  - id: check-json5
+  - id: check-toml
+  - id: check-yaml
+    args:
+    - --allow-multiple-documents
+  - id: check-merge-conflict
+  - id: check-xml
+  - id: mixed-line-ending
+    exclude: ^(CHANGELOG\.md|RELEASES\.md|CLAUDE\.md|AGENTS\.md|llms\.txt|\.claude/.*|\.cursor/.*|\.github/copilot-instructions\.md)$
+  - id: check-symlinks
+  - id: detect-private-key
+  - id: check-executables-have-shebangs
+- repo: https://github.com/tekwizely/pre-commit-golang
+  rev: v1.0.0-rc.4
+  hooks:
+  - id: go-mod-tidy
+  - id: go-fmt
+  - id: go-vulncheck-repo-mod
+    args:
+    - --hook:ignore-dir=internal/cli/testdata
+- repo: https://github.com/DavidAnson/markdownlint-cli2
+  rev: v0.18.1
+  hooks:
+  - id: markdownlint-cli2
+    args:
+    - --fix
+    files: .*\.(md|mdc)$
+    exclude: ^(CHANGELOG\.md)$
+    additional_dependencies:
+    - markdownlint-cli2
+- repo: https://github.com/shellcheck-py/shellcheck-py
+  rev: v0.10.0.1
+  hooks:
+  - id: shellcheck
+    args:
+    - -x
+    exclude: ^script/(\.harness|\.bootstrap/10-mise\.sh)$
+- repo: https://github.com/scop/pre-commit-shfmt
+  rev: v3.10.0-1
+  hooks:
+  - id: shfmt
+    args:
+    - -i
+    - '4'
+    - -ci
+    - -bn
+- repo: https://github.com/rhysd/actionlint
+  rev: v1.7.7
+  hooks:
+  - id: actionlint
+- repo: https://github.com/zizmorcore/zizmor-pre-commit
+  rev: v1.13.0
+  hooks:
+  - id: zizmor
+    args:
+    - --min-severity
+    - high
+    - --min-confidence
+    - medium

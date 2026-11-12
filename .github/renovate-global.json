@@ -1,0 +1,40 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-global-schema.json",
+  "onboarding": false,
+  "requireConfig": "optional",
+  "allowedCommands": ["^common-repo apply$"],
+  "enabledManagers": ["custom.regex"],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "common-repo upstream refs, url before ref",
+      "managerFilePatterns": ["/(^|/)\\.common-repo\\.ya?ml$/"],
+      "matchStrings": [
+        "url:[ \\t]*[\"']?https://github\\.com/(?<depName>[^/\\s\"'#]+/[^/\\s\"'#]+?)(?:\\.git)?[\"']?[ \\t]*(?:#[^\\n]*)?\\n(?:[ \\t]*(?:#[^\\n]*)?\\n)*[ \\t]*ref:[ \\t]*[\"']?(?<currentValue>[^\\s\"'#]+)"
+      ],
+      "datasourceTemplate": "git-tags",
+      "packageNameTemplate": "https://github.com/{{{depName}}}",
+      "depTypeTemplate": "common-repo"
+    },
+    {
+      "customType": "regex",
+      "description": "common-repo upstream refs, ref before url",
+      "managerFilePatterns": ["/(^|/)\\.common-repo\\.ya?ml$/"],
+      "matchStrings": [
+        "ref:[ \\t]*[\"']?(?<currentValue>[^\\s\"'#]+)[\"']?[ \\t]*(?:#[^\\n]*)?\\n(?:[ \\t]*(?:#[^\\n]*)?\\n)*[ \\t]*url:[ \\t]*[\"']?https://github\\.com/(?<depName>[^/\\s\"'#]+/[^/\\s\"'#]+?)(?:\\.git)?[\"']?[ \\t]*(?:#[^\\n]*)?(?:\\n|$)"
+      ],
+      "datasourceTemplate": "git-tags",
+      "packageNameTemplate": "https://github.com/{{{depName}}}",
+      "depTypeTemplate": "common-repo"
+    }
+  ],
+  "packageRules": [
+    {
+      "matchDepTypes": ["common-repo"],
+      "postUpgradeTasks": {
+        "commands": ["common-repo apply"],
+        "fileFilters": ["**/*"]
+      }
+    }
+  ]
+}

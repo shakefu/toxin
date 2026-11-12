@@ -141,10 +141,14 @@ script/console -- -h  # the toxin CLI against local etcd
 
 `script/` follows the
 [scripts-to-rule-them-all](https://github.com/github/scripts-to-rule-them-all)
-pattern: thin stubs run drop-ins from `script/.<phase>/`. The machinery is
-adapted from [textla/cr-golang](https://github.com/textla/cr-golang) and
-its common-repo upstreams (scripts-to-rule-them-all, semantic-release),
-carried in this repo directly rather than consumed through common-repo.
+pattern: thin stubs run drop-ins from `script/.<phase>/`. The devops
+machinery is consumed from the [common-repo](https://github.com/common-repo)
+org upstreams through `.common-repo.yaml` — semantic-release (cocogitto
+releases, published as the shakefu bot), renovate (self-hosted; it opens
+ref-bump PRs that run `common-repo apply`), and mise (the non-Go dev
+tools: prek, cocogitto, yass — `script/bootstrap` installs them locked;
+Go stays on `.go-version`). Files those upstreams manage are
+upstream-owned: `common-repo diff` must stay clean.
 
 Tests never run against a mock: testcontainers-go launches a real etcd v3
 container, one per test binary, and the first run pulls the image. The

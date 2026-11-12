@@ -1,0 +1,7 @@
+# mise installs the non-Go dev tools; script/bootstrap runs mise install
+# (locked when mise.lock is present). Go's version comes from .go-version
+# (goenv locally, actions/setup-go in CI), so it is not managed here.
+[tools]
+prek = "0.5.10"
+cocogitto = "7.0.0"
+"ubi:shakefu/yass" = "0.11.0"
