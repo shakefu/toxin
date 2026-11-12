@@ -28,6 +28,14 @@
 - repo:
     url: https://github.com/common-repo/mise
     ref: v0.1.0
+# Layer the Go toolchain into the chain-managed pre-commit workflow: the
+# go-vulncheck-repo-mod hook needs govulncheck on PATH.
+- yaml:
+    source: .github/pre-commit-steps.yaml
+    dest: .github/workflows/pre-commit.yaml
+    path: jobs.pre-commit.steps
+    array_mode: merge_by_key
+    key: name
 - template-vars:
     GH_APP_ID_SECRET: BOT_CLIENT_ID
     GH_APP_KEY_SECRET: BOT_PRIVATE_KEY

@@ -80,3 +80,26 @@ repos:
     - high
     - --min-confidence
     - medium
+- repo: builtin
+  hooks:
+  - id: trailing-whitespace
+    exclude: ^(CHANGELOG\.md|RELEASES\.md|CLAUDE\.md|AGENTS\.md|llms\.txt|\.claude/.*|\.cursor/.*|\.github/copilot-instructions\.md)$
+  - id: check-added-large-files
+  - id: check-case-conflict
+  - id: end-of-file-fixer
+    exclude: ^(CHANGELOG\.md|RELEASES\.md|CLAUDE\.md|AGENTS\.md|llms\.txt|\.claude/.*|\.cursor/.*|\.github/copilot-instructions\.md)$
+  - id: fix-byte-order-marker
+    exclude: ^(CHANGELOG\.md|RELEASES\.md|CLAUDE\.md|AGENTS\.md|llms\.txt|\.claude/.*|\.cursor/.*|\.github/copilot-instructions\.md)$
+  - id: check-json
+  - id: check-json5
+  - id: check-toml
+  - id: check-yaml
+    args:
+    - --allow-multiple-documents
+  - id: check-merge-conflict
+  - id: check-xml
+  - id: mixed-line-ending
+    exclude: ^(CHANGELOG\.md|RELEASES\.md|CLAUDE\.md|AGENTS\.md|llms\.txt|\.claude/.*|\.cursor/.*|\.github/copilot-instructions\.md)$
+  - id: check-symlinks
+  - id: detect-private-key
+  - id: check-executables-have-shebangs
