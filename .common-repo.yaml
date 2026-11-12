@@ -36,6 +36,7 @@
     path: jobs.pre-commit.steps
     array_mode: merge_by_key
     key: name
+    position: start
 - template-vars:
     GH_APP_ID_SECRET: BOT_CLIENT_ID
     GH_APP_KEY_SECRET: BOT_PRIVATE_KEY
