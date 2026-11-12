@@ -1,0 +1,34 @@
+# common-repo configuration — toxin consumes the common-repo org upstreams
+# directly (no language baseline repo): semantic-release brings the
+# cocogitto release pipeline and, transitively, the conventional-commits
+# PR check; mise brings the bootstrap drop-in and, transitively, the
+# scripts-to-rule-them-all harness; renovate keeps every ref above
+# current. The bot App behind release and renovate is the existing
+# shakefu bot: secrets BOT_CLIENT_ID / BOT_PRIVATE_KEY.
+- repo:
+    url: https://github.com/common-repo/semantic-release
+    ref: v0.12.2
+    with:
+      # toxin owns .github/workflows/ci.yaml — the Go toolchain, the yass
+      # spec gates and the testcontainers-backed tests are toxin-specific.
+      - exclude:
+          - ".github/workflows/ci.yaml"
+      # Merge the chain's pre-commit baseline into toxin's config by repo
+      # key instead of appending a second copy (cr-golang's pattern): the
+      # chain delivers common-repo/pre-commit through conventional-commits
+      # with append_unique, which would run the builtin hooks twice and
+      # reintroduce a check-json without the testdata fixture exclude.
+      - yaml:
+          auto-merge: .pre-commit-config.yaml
+          array_mode: merge_by_key
+          key: repo
+- repo:
+    url: https://github.com/common-repo/renovate
+    ref: v0.2.2
+- repo:
+    url: https://github.com/common-repo/mise
+    ref: v0.1.0
+- template-vars:
+    GH_APP_ID_SECRET: BOT_CLIENT_ID
+    GH_APP_KEY_SECRET: BOT_PRIVATE_KEY
+    GH_APP_OWNER: shakefu

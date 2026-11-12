@@ -1,0 +1,114 @@
+# Self-hosted Renovate that bumps the upstream refs in .common-repo.yaml and
+# runs `common-repo apply` on each bump. Shared rules live in
+# .github/renovate-global.json; a repo's own renovate.json layers on top.
+name: Renovate
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: Log what Renovate would do without pushing branches or opening PRs
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: renovate
+  cancel-in-progress: false
+
+jobs:
+  renovate:
+    name: Renovate
+    runs-on: ubuntu-latest
+    env:
+      # Comma-separated private upstreams under the App owner.
+      EXTRA_REPOSITORIES: ""
+    steps:
+      # Only the global config is needed; Renovate clones the repo itself.
+      - name: Check out global config
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/renovate-global.json
+          sparse-checkout-cone-mode: false
+
+      # github.event has no repository on schedule events, so derive the name
+      # from GITHUB_REPOSITORY.
+      - name: Resolve repository name
+        id: repo
+        run: echo "name=${GITHUB_REPOSITORY#*/}" >> "$GITHUB_OUTPUT"
+
+      # Renovate hands its token to post-upgrade commands as a git insteadOf
+      # for github.com, so this token reaches `common-repo apply` and must
+      # only be able to write to the repo being updated.
+      - name: Generate app token
+        id: app-token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ secrets.BOT_CLIENT_ID }}
+          private-key: ${{ secrets.BOT_PRIVATE_KEY }}
+          owner: shakefu
+          repositories: ${{ steps.repo.outputs.name }}
+          permission-contents: write
+          permission-pull-requests: write
+          # Dependency Dashboard issue, if the repo config enables it.
+          permission-issues: write
+          # `common-repo apply` rewrites files under .github/workflows/.
+          permission-workflows: write
+          permission-checks: read
+          permission-statuses: read
+
+      # Private upstreams get a separate read-only token: Renovate reads their
+      # tags and `common-repo apply` clones them, but nothing pushes to them.
+      - name: Generate read-only token for private upstreams
+        id: read-token
+        if: env.EXTRA_REPOSITORIES != ''
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ secrets.BOT_CLIENT_ID }}
+          private-key: ${{ secrets.BOT_PRIVATE_KEY }}
+          owner: shakefu
+          repositories: ${{ env.EXTRA_REPOSITORIES }}
+          permission-contents: read
+
+      # One host rule per private upstream. Renovate turns each into a git
+      # insteadOf for that repo URL, which git prefers over the shorter
+      # github.com rule, for tag lookups and post-upgrade clones alike.
+      # matchHost and insteadOf both match by prefix, so the token also goes
+      # to a same-owner repo whose name starts with an upstream's. That's
+      # harmless: the token can only read the listed upstreams.
+      - name: Route private upstreams to the read-only token
+        if: env.EXTRA_REPOSITORIES != ''
+        env:
+          OWNER: shakefu
+          READ_TOKEN: ${{ steps.read-token.outputs.token }}
+        run: |
+          rules="$(jq -nc --arg owner "${OWNER}" --arg repos "${EXTRA_REPOSITORIES}" --arg token "${READ_TOKEN}" \
+            '[$repos | split(",")[] | gsub("\\s"; "") | select(length > 0)
+              | {hostType: "github", matchHost: "https://github.com/\($owner)/\(.)", token: $token}]')"
+          echo "RENOVATE_HOST_RULES=${rules}" >> "$GITHUB_ENV"
+
+      # Pinned: `common-repo apply` output differs between CLI versions, and
+      # Renovate commits whatever apply produces.
+      - name: Install common-repo
+        id: cr
+        uses: common-repo/setup-common-repo@887d2b31e6678fb650d1b1b6fb6097afa5528310 # v1.0.1
+        with:
+          version: v0.38.4
+
+      # The common-repo binary is mounted into the Renovate container so the
+      # postUpgradeTasks in the global config can run `common-repo apply`.
+      - name: Run Renovate
+        uses: renovatebot/github-action@9fea9f0fbf80401026d11d03911d62b1f70fef1f # v46.3.3
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          configurationFile: .github/renovate-global.json
+          docker-volumes: /tmp:/tmp;${{ steps.cr.outputs.path }}:/usr/local/bin/common-repo:ro
+        env:
+          RENOVATE_REPOSITORIES: ${{ github.repository }}
+          RENOVATE_DRY_RUN: ${{ inputs.dry-run && 'full' || '' }}
+          LOG_LEVEL: info

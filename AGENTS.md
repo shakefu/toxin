@@ -25,8 +25,16 @@ repos `../pyconfig` and `../jetconfig`.
 - `internal/testutil` — the shared testcontainers etcd container the
   tests run against.
 - `script/` — scripts-to-rule-them-all harness: thin stubs run drop-ins
-  from `script/.<phase>/`; machinery adapted from `textla/cr-golang` and
-  its common-repo upstreams, not consumed through common-repo.
+  from `script/.<phase>/`; `script/test` runs the yass gates, the Go
+  suite (real etcd via testcontainers) and gofmt/vet; `script/server`
+  runs a local etcd.
+- `.common-repo.yaml` — pins the common-repo upstreams (semantic-release,
+  renovate, mise; scripts-to-rule-them-all and conventional-commits
+  arrive transitively through them). Files those upstreams manage are
+  upstream-owned: change them upstream, never in place.
+- `mise.toml` + `mise.lock` — the non-Go dev tools (prek, cocogitto,
+  yass); `script/bootstrap` installs them locked. Go stays on
+  `.go-version` (goenv locally, setup-go in CI).
 
 Numeric file prefixes are implementation order: etcd3 layer, then API,
 then CLI.
@@ -39,6 +47,8 @@ then CLI.
   implements it.
 - Commits follow Conventional Commits; merging a `feat:` or `fix:` to
   `main` releases via cocogitto (`release.yaml`).
+- Managed files must match `common-repo apply`; a change that leaves
+  `common-repo diff` nonzero is not done.
 
 ## Commands
 
@@ -48,6 +58,7 @@ script/test          # yass gates, go test (Docker: testcontainers starts
 script/setup         # prek install; checks yass is on PATH
 script/server        # local etcd on 127.0.0.1:2379
 script/console -- -h # the toxin CLI against local etcd
+common-repo diff     # managed files match what apply would write
 yass list            # every document in the spec set
 yass query root@toxin # one spec, references resolved
 yass find PATTERN    # search obligation prose

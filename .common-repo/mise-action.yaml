@@ -1,0 +1,21 @@
+# Opt-in CI fragment: a single step adding the mise GitHub Action
+# (https://github.com/jdx/mise-action) to the Test job of the
+# upstream-managed .github/workflows/ci.yaml. This file is inert until a
+# consumer merges it — opt in from .common-repo.yaml with:
+#
+#   - yaml:
+#       source: .common-repo/mise-action.yaml
+#       dest: .github/workflows/ci.yaml
+#       path: jobs.test.steps
+#       array_mode: merge_by_key
+#       position: start
+#
+# Caveat: position: start lands this step before actions/checkout today,
+# so tools still install via script/bootstrap, and the action's
+# install/cache only see mise.toml after checkout. Anchored placement is
+# tracked at https://github.com/common-repo/common-repo/issues/396.
+- name: Tools (mise)
+  uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5
+  with:
+    install: true
+    cache: true

@@ -19,6 +19,25 @@ concurrency:
     cancel-in-progress: true
 
 jobs:
+    validate:
+        name: Validate
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
+            # The upstreams in .common-repo.yaml are public, so the CLI
+            # clones them anonymously — no token needed.
+            - uses: common-repo/setup-common-repo@887d2b31e6678fb650d1b1b6fb6097afa5528310 # v1
+              with:
+                  version: v0.38.4
+            - name: Validate configuration
+              run: common-repo validate
+            # Exits 1 when a managed file differs from the result of
+            # `common-repo apply`.
+            - name: Check managed files
+              run: common-repo diff
+
     lint:
         name: Lint
         runs-on: ubuntu-latest
