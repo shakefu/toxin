@@ -1,10 +1,9 @@
 # Merged into the managed .github/workflows/pre-commit.yaml by
-# .common-repo.yaml: the go-vulncheck-repo-mod hook needs the Go
-# toolchain and govulncheck on PATH, which a bare runner lacks.
-# Step names are the merge keys.
-- name: Set up Go
-  uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
-  with:
-      go-version-file: .go-version
+# .common-repo.yaml (position: start, so before Checkout): the
+# go-vulncheck-repo-mod hook needs govulncheck on PATH, which a bare
+# runner lacks. Uses the runner's preinstalled Go — no checkout needed —
+# and exports the install dir for the steps that follow.
 - name: Install govulncheck
-  run: go install golang.org/x/vuln/cmd/govulncheck@latest
+  run: |
+      go install golang.org/x/vuln/cmd/govulncheck@latest
+      echo "$HOME/go/bin" >> "$GITHUB_PATH"
