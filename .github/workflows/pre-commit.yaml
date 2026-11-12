@@ -1,24 +1,28 @@
+# From common-repo/pre-commit
 name: Lint
+
 on:
   pull_request:
     branches:
-    - main
-  workflow_call: null
+      - main
+  workflow_call:
+
 permissions:
   contents: read
+
 concurrency:
   group: common-repo/pre-commit/lint/pre-commit-${{ github.workflow }}-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
+
 jobs:
   pre-commit:
     name: Pre-Commit
     runs-on: ubuntu-latest
+    # Step names are merge keys: a consumer that merges this workflow into
+    # its own with `array_mode: merge_by_key` and `key: name` gets pin bumps
+    # in place. Keep them stable.
     steps:
-    - name: Install govulncheck
-      run: |
-        go install golang.org/x/vuln/cmd/govulncheck@latest
-        echo "$HOME/go/bin" >> "$GITHUB_PATH"
-    - name: Checkout
-      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-    - name: Run prek
-      uses: j178/prek-action@44924fe9ef4a6f88253c4b6b1bf11c689d3ce53d
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Run prek
+        uses: j178/prek-action@44924fe9ef4a6f88253c4b6b1bf11c689d3ce53d # v3.1.0

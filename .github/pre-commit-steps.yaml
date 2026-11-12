@@ -1,9 +1,0 @@
-# Merged into the managed .github/workflows/pre-commit.yaml by
-# .common-repo.yaml (position: start, so before Checkout): the
-# go-vulncheck-repo-mod hook needs govulncheck on PATH, which a bare
-# runner lacks. Uses the runner's preinstalled Go — no checkout needed —
-# and exports the install dir for the steps that follow.
-- name: Install govulncheck
-  run: |
-      go install golang.org/x/vuln/cmd/govulncheck@latest
-      echo "$HOME/go/bin" >> "$GITHUB_PATH"
