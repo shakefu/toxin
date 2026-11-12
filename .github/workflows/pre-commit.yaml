@@ -1,28 +1,30 @@
-# From common-repo/pre-commit
+# toxin-owned workflow; the chain's pre-commit stub merges into this file
+# by step name (common-repo yaml auto-merge), so the step order here wins.
+# The Go steps must precede prek: the go hooks need the pinned toolchain
+# and govulncheck on PATH — a bare runner has neither.
 name: Lint
-
 on:
   pull_request:
     branches:
-      - main
+    - main
   workflow_call:
-
 permissions:
   contents: read
-
 concurrency:
   group: common-repo/pre-commit/lint/pre-commit-${{ github.workflow }}-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
-
 jobs:
   pre-commit:
     name: Pre-Commit
     runs-on: ubuntu-latest
-    # Step names are merge keys: a consumer that merges this workflow into
-    # its own with `array_mode: merge_by_key` and `key: name` gets pin bumps
-    # in place. Keep them stable.
     steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Run prek
-        uses: j178/prek-action@44924fe9ef4a6f88253c4b6b1bf11c689d3ce53d # v3.1.0
+    - name: Checkout
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+    - name: Set up Go
+      uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+      with:
+        go-version-file: .go-version
+    - name: Install govulncheck
+      run: go install golang.org/x/vuln/cmd/govulncheck@latest
+    - name: Run prek
+      uses: j178/prek-action@44924fe9ef4a6f88253c4b6b1bf11c689d3ce53d # v3.1.0
