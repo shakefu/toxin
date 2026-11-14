@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io/fs"
 	"os"
-	"strings"
 
 	"github.com/shakefu/toxin"
 )
@@ -109,7 +108,7 @@ func get(ctx context.Context,
 	}
 	v, err := conf.GetStrict(key)
 	if err != nil {
-		if strings.HasPrefix(err.Error(), `No setting "`) {
+		if errors.Is(err, toxin.ErrNoSetting) {
 			return silentExit(1)
 		}
 		return err

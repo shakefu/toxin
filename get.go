@@ -2,10 +2,15 @@ package toxin
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/shakefu/toxin/internal/etcd"
 )
+
+// ErrNoSetting is wrapped by the strict variant's unset-key error; the
+// rendered message stays 'No setting "<key>"'. Match it with errors.Is.
+var ErrNoSetting = errors.New("No setting")
 
 // Get returns the value of the setting key, or def when the key is unset.
 // A nil def means no default: an unset key yields nil rather than an
@@ -43,7 +48,7 @@ func (c *Config) GetStrict(key string, opts ...CallOption) (any, error) {
 		return nil, err
 	}
 	if !found {
-		return nil, fmt.Errorf("No setting %q", k)
+		return nil, fmt.Errorf("%w %q", ErrNoSetting, k)
 	}
 	return v, nil
 }
