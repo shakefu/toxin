@@ -350,3 +350,23 @@ func TestDumpOverlaysParentFirstOwnKeysWin(t *testing.T) {
 		t.Error("Dump(allowInherited=false) includes parent keys")
 	}
 }
+
+// 20-api@toxin.New: WithInheritKey renames the key holding the parent
+// prefix; the default key is not consulted when a custom one is set.
+func TestWithInheritKeyRenamesTheInheritKey(t *testing.T) {
+	raw := newRawClient(t)
+	rawPut(t, raw, "/inh-childkey/custom.parent", "inh-base-key/")
+	rawPut(t, raw, "/inh-base-key/shared.key", "from-custom-key")
+	// A parent under the default key must be ignored.
+	rawPut(t, raw, "/inh-childkey/config.inherit", "inh-base-def/")
+	rawPut(t, raw, "/inh-base-def/shared.key", "from-default-key")
+
+	c := newTestConfig(t, WithPrefix("inh-childkey/"), WithInheritKey("custom.parent"))
+	got, err := c.Get("shared.key", "default")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got != "from-custom-key" {
+		t.Errorf("custom inherit key Get = %v, want %q", got, "from-custom-key")
+	}
+}
