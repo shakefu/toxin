@@ -49,6 +49,158 @@ checksum_source = "mise-versions"
 url = "https://github.com/cocogitto/cocogitto/releases/download/7.0.0/cocogitto-7.0.0-x86_64-pc-windows-msvc.tar.gz"
 url_api = "https://api.github.com/repos/cocogitto/cocogitto/releases/assets/366659399"
 
+[[tools.colima]]
+version = "0.10.3"
+backend = "aqua:abiosoft/colima"
+specifiers = ["0.10.3"]
+
+[tools.colima."platforms.linux-arm64"]
+checksum = "sha256:ebb69208007484ac36b8a6ba72a797189b0daa88f8b31bc2b563e82b9c91cb70"
+checksum_source = "mise-versions"
+url = "https://github.com/abiosoft/colima/releases/download/v0.10.3/colima-Linux-aarch64"
+url_api = "https://api.github.com/repos/abiosoft/colima/releases/assets/438456730"
+
+[tools.colima."platforms.linux-arm64-musl"]
+checksum = "sha256:ebb69208007484ac36b8a6ba72a797189b0daa88f8b31bc2b563e82b9c91cb70"
+checksum_source = "mise-versions"
+url = "https://github.com/abiosoft/colima/releases/download/v0.10.3/colima-Linux-aarch64"
+url_api = "https://api.github.com/repos/abiosoft/colima/releases/assets/438456730"
+
+[tools.colima."platforms.linux-x64"]
+checksum = "sha256:54ea35f4847815d0a1445dbc2bc3dd6469518a38a9e960449e96b044d248d00d"
+checksum_source = "mise-versions"
+url = "https://github.com/abiosoft/colima/releases/download/v0.10.3/colima-Linux-x86_64"
+url_api = "https://api.github.com/repos/abiosoft/colima/releases/assets/438456720"
+
+[tools.colima."platforms.linux-x64-musl"]
+checksum = "sha256:54ea35f4847815d0a1445dbc2bc3dd6469518a38a9e960449e96b044d248d00d"
+checksum_source = "mise-versions"
+url = "https://github.com/abiosoft/colima/releases/download/v0.10.3/colima-Linux-x86_64"
+url_api = "https://api.github.com/repos/abiosoft/colima/releases/assets/438456720"
+
+[tools.colima."platforms.macos-arm64"]
+checksum = "sha256:980ad8bf61a4ca370243f4cb41401a61276dcd2c2502bee7b9b86f9250169f34"
+url = "https://github.com/abiosoft/colima/releases/download/v0.10.3/colima-Darwin-arm64"
+url_api = "https://api.github.com/repos/abiosoft/colima/releases/assets/438456725"
+
+[tools.colima."platforms.macos-x64"]
+checksum = "sha256:3082737fe8a98afda11cba7d9a20b6e56fe80c6153464beda04bec630758770b"
+checksum_source = "mise-versions"
+url = "https://github.com/abiosoft/colima/releases/download/v0.10.3/colima-Darwin-x86_64"
+url_api = "https://api.github.com/repos/abiosoft/colima/releases/assets/438456722"
+
+[[tools.docker-cli]]
+version = "29.9.3"
+backend = "aqua:docker/cli"
+specifiers = ["29.9.3"]
+
+[tools.docker-cli."platforms.linux-arm64"]
+checksum = "sha256:1b27fd739378ef938401e81ce5afb73b7ad7432d4f598814a9ff5f826bb464d2"
+url = "https://download.docker.com/linux/static/stable/aarch64/docker-29.9.3.tgz"
+
+[tools.docker-cli."platforms.linux-arm64-musl"]
+checksum = "sha256:1b27fd739378ef938401e81ce5afb73b7ad7432d4f598814a9ff5f826bb464d2"
+url = "https://download.docker.com/linux/static/stable/aarch64/docker-29.9.3.tgz"
+
+[tools.docker-cli."platforms.linux-x64"]
+checksum = "sha256:3fb5d1f13014c18cc54945bc177c58a9056a482dada031e17d12cf2e6922c973"
+url = "https://download.docker.com/linux/static/stable/x86_64/docker-29.9.3.tgz"
+
+[tools.docker-cli."platforms.linux-x64-musl"]
+checksum = "sha256:3fb5d1f13014c18cc54945bc177c58a9056a482dada031e17d12cf2e6922c973"
+url = "https://download.docker.com/linux/static/stable/x86_64/docker-29.9.3.tgz"
+
+[tools.docker-cli."platforms.macos-arm64"]
+checksum = "blake3:b7163dbba9272469e0e6933d06f47083f0180dbe48176295beaf8871f6aef882"
+url = "https://download.docker.com/mac/static/stable/aarch64/docker-29.9.3.tgz"
+
+[tools.docker-cli."platforms.macos-x64"]
+checksum = "sha256:f7d8f835391cd0a8c676d9a8d2547f909da6a2d029595943b0ce8d5f169abe47"
+url = "https://download.docker.com/mac/static/stable/x86_64/docker-29.9.3.tgz"
+
+[tools.docker-cli."platforms.windows-x64"]
+checksum = "sha256:7c4ff7bbb31579046cd34dd8b91f7cbd3ab3482a1a85330170be726ef792d751"
+url = "https://download.docker.com/win/static/stable/x86_64/docker-29.9.3.zip"
+
+[[tools.docker-compose]]
+version = "5.7.1"
+backend = "github:docker/compose"
+specifiers = ["5.7.1"]
+
+[tools.docker-compose."platforms.linux-arm64"]
+checksum = "sha256:f2f49f903240895fa764c0dca3a14548b754ad9426f6b609ccaf55ec5a3aa2a5"
+checksum_source = "mise-versions"
+url = "https://github.com/docker/compose/releases/download/v5.7.1/docker-compose-linux-aarch64"
+url_api = "https://api.github.com/repos/docker/compose/releases/assets/734662228"
+
+[tools.docker-compose."platforms.linux-arm64-musl"]
+checksum = "sha256:f2f49f903240895fa764c0dca3a14548b754ad9426f6b609ccaf55ec5a3aa2a5"
+checksum_source = "mise-versions"
+url = "https://github.com/docker/compose/releases/download/v5.7.1/docker-compose-linux-aarch64"
+url_api = "https://api.github.com/repos/docker/compose/releases/assets/734662228"
+
+[tools.docker-compose."platforms.linux-x64"]
+checksum = "sha256:af426722a8af5de812fcee30cc1c39f0639f5f723cbadefb25e5d4db054064cf"
+checksum_source = "mise-versions"
+url = "https://github.com/docker/compose/releases/download/v5.7.1/docker-compose-linux-x86_64"
+url_api = "https://api.github.com/repos/docker/compose/releases/assets/734662195"
+
+[tools.docker-compose."platforms.linux-x64-musl"]
+checksum = "sha256:af426722a8af5de812fcee30cc1c39f0639f5f723cbadefb25e5d4db054064cf"
+checksum_source = "mise-versions"
+url = "https://github.com/docker/compose/releases/download/v5.7.1/docker-compose-linux-x86_64"
+url_api = "https://api.github.com/repos/docker/compose/releases/assets/734662195"
+
+[tools.docker-compose."platforms.macos-arm64"]
+checksum = "sha256:5a9aa8b5fb5b1e3cd83f39c80e570ae30aafd74cd9b47264fbe4ff7e6e6251ca"
+url = "https://github.com/docker/compose/releases/download/v5.7.1/docker-compose-darwin-aarch64"
+url_api = "https://api.github.com/repos/docker/compose/releases/assets/734662223"
+
+[tools.docker-compose."platforms.macos-x64"]
+checksum = "sha256:c28b37c7bf1cc315acdf511c2c0f34ce19d4d33b6038611617063a99c45417c6"
+checksum_source = "mise-versions"
+url = "https://github.com/docker/compose/releases/download/v5.7.1/docker-compose-darwin-x86_64"
+url_api = "https://api.github.com/repos/docker/compose/releases/assets/734662221"
+
+[tools.docker-compose."platforms.windows-x64"]
+checksum = "sha256:e4316597452650ae92fe9719a2a7c2fce8f56c5ceafed88d2aed6e39b2b2b2d0"
+checksum_source = "mise-versions"
+url = "https://github.com/docker/compose/releases/download/v5.7.1/docker-compose-windows-x86_64.exe"
+url_api = "https://api.github.com/repos/docker/compose/releases/assets/734662190"
+
+[[tools.go]]
+version = "1.26.11"
+backend = "core:go"
+specifiers = ["1.26.11"]
+
+[tools.go."platforms.linux-arm64"]
+checksum = "sha256:6c2f29b458b5add0835f18b776f69c8881a6d88428f1484a6da55755e620757e"
+url = "https://dl.google.com/go/go1.26.11.linux-arm64.tar.gz"
+
+[tools.go."platforms.linux-arm64-musl"]
+checksum = "sha256:6c2f29b458b5add0835f18b776f69c8881a6d88428f1484a6da55755e620757e"
+url = "https://dl.google.com/go/go1.26.11.linux-arm64.tar.gz"
+
+[tools.go."platforms.linux-x64"]
+checksum = "sha256:9849f4e04ee35303714e34fbc3ac8ab44ea3e448a95aa182f91e3b9b79c710ec"
+url = "https://dl.google.com/go/go1.26.11.linux-amd64.tar.gz"
+
+[tools.go."platforms.linux-x64-musl"]
+checksum = "sha256:9849f4e04ee35303714e34fbc3ac8ab44ea3e448a95aa182f91e3b9b79c710ec"
+url = "https://dl.google.com/go/go1.26.11.linux-amd64.tar.gz"
+
+[tools.go."platforms.macos-arm64"]
+checksum = "sha256:e3a42e67a7a8acf450ebada2b074c7ca863000ca514907b7185b45e8f5cdff57"
+url = "https://dl.google.com/go/go1.26.11.darwin-arm64.tar.gz"
+
+[tools.go."platforms.macos-x64"]
+checksum = "sha256:394baae971332f2bc783d6e2004ae57101479bd3b06ed8209a3fe3570d4ce498"
+url = "https://dl.google.com/go/go1.26.11.darwin-amd64.tar.gz"
+
+[tools.go."platforms.windows-x64"]
+checksum = "sha256:71ae086f0137e665f855a811cc119152b6a783e0bbc1b906e709f46d80141eb0"
+url = "https://dl.google.com/go/go1.26.11.windows-amd64.zip"
+
 [[tools.prek]]
 version = "0.5.10"
 backend = "aqua:j178/prek"

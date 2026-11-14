@@ -145,10 +145,12 @@ pattern: thin stubs run drop-ins from `script/.<phase>/`. The devops
 machinery is consumed from the [common-repo](https://github.com/common-repo)
 org upstreams through `.common-repo.yaml` — semantic-release (cocogitto
 releases, published as the shakefu bot), renovate (self-hosted; it opens
-ref-bump PRs that run `common-repo apply`), and mise (the non-Go dev
-tools: prek, cocogitto, yass — `script/bootstrap` installs them locked;
-Go stays on `.go-version`). Files those upstreams manage are
-upstream-owned: `common-repo diff` must stay clean.
+ref-bump PRs that run `common-repo apply`), and mise (the whole dev
+toolchain: go, prek, cocogitto, yass, and the docker trio — colima,
+docker-cli, docker-compose; `script/bootstrap` installs everything locked
+and starts colima when no docker daemon answers). Go's pin also travels
+in `.go-version` for goenv and CI's setup-go. Files those upstreams
+manage are upstream-owned: `common-repo diff` must stay clean.
 
 Tests never run against a mock: testcontainers-go launches a real etcd v3
 container, one per test binary, and the first run pulls the image. The
