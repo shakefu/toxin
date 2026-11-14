@@ -32,9 +32,11 @@ repos `../pyconfig` and `../jetconfig`.
   renovate, mise; scripts-to-rule-them-all and conventional-commits
   arrive transitively through them). Files those upstreams manage are
   upstream-owned: change them upstream, never in place.
-- `mise.toml` + `mise.lock` — the non-Go dev tools (prek, cocogitto,
-  yass); `script/bootstrap` installs them locked. Go stays on
-  `.go-version` (goenv locally, setup-go in CI).
+- `mise.toml` + `mise.lock` — the dev toolchain: go (pinned in sync with
+  `.go-version`, which goenv and setup-go read), prek, cocogitto, yass,
+  and the docker trio (colima, docker-cli, docker-compose).
+  `script/bootstrap` installs everything locked and fails fast when no
+  docker daemon answers.
 
 Numeric file prefixes are implementation order: etcd3 layer, then API,
 then CLI.
