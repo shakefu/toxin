@@ -291,6 +291,11 @@ url = "https://dl.google.com/go/go1.26.11.darwin-amd64.tar.gz"
 checksum = "sha256:71ae086f0137e665f855a811cc119152b6a783e0bbc1b906e709f46d80141eb0"
 url = "https://dl.google.com/go/go1.26.11.windows-amd64.zip"
 
+[[tools."go:golang.org/x/vuln/cmd/govulncheck"]]
+version = "1.9.0"
+backend = "go:golang.org/x/vuln/cmd/govulncheck"
+specifiers = ["1.9.0"]
+
 [[tools.prek]]
 version = "0.5.10"
 backend = "aqua:j178/prek"

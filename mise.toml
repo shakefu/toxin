@@ -19,3 +19,5 @@ docker-cli = "29.9.3"
 docker-compose = "5.7.1"
 "github:shakefu/yass" = "0.11.0"
 "github:common-repo/common-repo" = "0.38.4" # machinery maintenance; matches the Validate job
+
+"go:golang.org/x/vuln/cmd/govulncheck" = "1.9.0" # no upstream binaries; mise builds once, then it caches like any tool
