@@ -1,8 +1,13 @@
 # CI for toxin. release.yaml calls this workflow through workflow_call
 # before it releases; the job names Lint and Test are the required status
-# checks. The Test job runs script/cibuild, which runs script/test: the
-# yass spec gates, the Go test suite (which needs Docker — the tests launch
-# real etcd containers through testcontainers-go), and gofmt/go vet.
+# checks. Every job installs the mise toolchain bundle (mise.toml +
+# mise.lock, cached by the mise action) — the same versions bootstrap
+# installs locally. govulncheck is the one exception: golang/vuln ships
+# no release binaries, so it is go-installed from the mise-provided Go at
+# a pinned version. The Test job runs script/cibuild, which runs
+# script/test: the yass spec gates, the Go test suite (which needs
+# Docker — the tests launch real etcd containers through
+# testcontainers-go), and gofmt/go vet.
 name: CI
 
 on:
@@ -27,10 +32,10 @@ jobs:
               with:
                   persist-credentials: false
             # The upstreams in .common-repo.yaml are public, so the CLI
-            # clones them anonymously — no token needed.
-            - uses: common-repo/setup-common-repo@887d2b31e6678fb650d1b1b6fb6097afa5528310 # v1
-              with:
-                  version: v0.38.4
+            # clones them anonymously — no token needed. The version is
+            # the mise.toml pin, not setup-common-repo's input.
+            - name: Tools (mise)
+              uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5
             - name: Validate configuration
               run: common-repo validate
             # Exits 1 when a managed file differs from the result of
@@ -45,11 +50,12 @@ jobs:
             - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
               with:
                   persist-credentials: false
-            - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
-              with:
-                  go-version-file: .go-version
+            - name: Tools (mise)
+              uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5
             - name: Install govulncheck
-              run: go install golang.org/x/vuln/cmd/govulncheck@latest
+              run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+            # prek is already on PATH from the mise bundle; the action
+            # detects it and only fetches the pre-commit environments.
             - uses: j178/prek-action@44924fe9ef4a6f88253c4b6b1bf11c689d3ce53d # v3.1.0
 
     test:
@@ -59,14 +65,7 @@ jobs:
             - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
               with:
                   persist-credentials: false
-            - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
-              with:
-                  go-version-file: .go-version
-            - name: Install yass
-              run: |
-                  set -euo pipefail
-                  curl -fsSL https://raw.githubusercontent.com/shakefu/yass/main/install.sh \
-                      | sh -s -- --version v0.11.0
-                  yass --version
+            - name: Tools (mise)
+              uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5
             - name: Run tests
               run: ./script/cibuild

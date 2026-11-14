@@ -80,6 +80,7 @@ url_api = "https://api.github.com/repos/abiosoft/colima/releases/assets/43845672
 
 [tools.colima."platforms.macos-arm64"]
 checksum = "sha256:980ad8bf61a4ca370243f4cb41401a61276dcd2c2502bee7b9b86f9250169f34"
+checksum_source = "mise-versions"
 url = "https://github.com/abiosoft/colima/releases/download/v0.10.3/colima-Darwin-arm64"
 url_api = "https://api.github.com/repos/abiosoft/colima/releases/assets/438456725"
 
@@ -111,7 +112,7 @@ checksum = "sha256:3fb5d1f13014c18cc54945bc177c58a9056a482dada031e17d12cf2e6922c
 url = "https://download.docker.com/linux/static/stable/x86_64/docker-29.9.3.tgz"
 
 [tools.docker-cli."platforms.macos-arm64"]
-checksum = "blake3:b7163dbba9272469e0e6933d06f47083f0180dbe48176295beaf8871f6aef882"
+checksum = "sha256:79145e169bca0b9571d02de8e1cd311a36e0e8fdb4599b6661a87b1bb3afbe13"
 url = "https://download.docker.com/mac/static/stable/aarch64/docker-29.9.3.tgz"
 
 [tools.docker-cli."platforms.macos-x64"]
@@ -153,6 +154,7 @@ url_api = "https://api.github.com/repos/docker/compose/releases/assets/734662195
 
 [tools.docker-compose."platforms.macos-arm64"]
 checksum = "sha256:5a9aa8b5fb5b1e3cd83f39c80e570ae30aafd74cd9b47264fbe4ff7e6e6251ca"
+checksum_source = "mise-versions"
 url = "https://github.com/docker/compose/releases/download/v5.7.1/docker-compose-darwin-aarch64"
 url_api = "https://api.github.com/repos/docker/compose/releases/assets/734662223"
 
@@ -167,6 +169,94 @@ checksum = "sha256:e4316597452650ae92fe9719a2a7c2fce8f56c5ceafed88d2aed6e39b2b2b
 checksum_source = "mise-versions"
 url = "https://github.com/docker/compose/releases/download/v5.7.1/docker-compose-windows-x86_64.exe"
 url_api = "https://api.github.com/repos/docker/compose/releases/assets/734662190"
+
+[[tools."github:common-repo/common-repo"]]
+version = "0.38.4"
+backend = "github:common-repo/common-repo"
+specifiers = ["0.38.4"]
+
+[tools."github:common-repo/common-repo"."platforms.linux-arm64"]
+checksum = "sha256:62513a680521e82273b9bc0e92d7d9caecd18ea193b561755f758a7af53b5c05"
+checksum_source = "mise-versions"
+url = "https://github.com/common-repo/common-repo/releases/download/v0.38.4/common-repo-v0.38.4-aarch64-unknown-linux-gnu.tar.gz"
+url_api = "https://api.github.com/repos/common-repo/common-repo/releases/assets/711082793"
+
+[tools."github:common-repo/common-repo"."platforms.linux-arm64-musl"]
+checksum = "sha256:62513a680521e82273b9bc0e92d7d9caecd18ea193b561755f758a7af53b5c05"
+checksum_source = "mise-versions"
+url = "https://github.com/common-repo/common-repo/releases/download/v0.38.4/common-repo-v0.38.4-aarch64-unknown-linux-gnu.tar.gz"
+url_api = "https://api.github.com/repos/common-repo/common-repo/releases/assets/711082793"
+
+[tools."github:common-repo/common-repo"."platforms.linux-x64"]
+checksum = "sha256:c7fa67a72a65066b9f7c67cc557b83e3a0bfa0e4a389b8b980276022d812a691"
+checksum_source = "mise-versions"
+url = "https://github.com/common-repo/common-repo/releases/download/v0.38.4/common-repo-v0.38.4-x86_64-unknown-linux-gnu.tar.gz"
+url_api = "https://api.github.com/repos/common-repo/common-repo/releases/assets/711081874"
+
+[tools."github:common-repo/common-repo"."platforms.linux-x64-musl"]
+checksum = "sha256:2ac53ff1577029a73b72fbf5a4b766f17d2ff528ff2e4e47f90d16de3bd9fd66"
+checksum_source = "mise-versions"
+url = "https://github.com/common-repo/common-repo/releases/download/v0.38.4/common-repo-v0.38.4-x86_64-unknown-linux-musl.tar.gz"
+url_api = "https://api.github.com/repos/common-repo/common-repo/releases/assets/711081229"
+
+[tools."github:common-repo/common-repo"."platforms.macos-arm64"]
+checksum = "sha256:b1eca523a9300ba0a8d0ddaf032a45aaa24ce9772e300757b2bdae9c63e9e399"
+checksum_source = "mise-versions"
+url = "https://github.com/common-repo/common-repo/releases/download/v0.38.4/common-repo-v0.38.4-aarch64-apple-darwin.tar.gz"
+url_api = "https://api.github.com/repos/common-repo/common-repo/releases/assets/711084195"
+
+[tools."github:common-repo/common-repo"."platforms.windows-x64"]
+checksum = "sha256:0f835a6a3aa46544a6363edff2a168f38aeea79eab9a909b4ad4cfb22d54ff67"
+checksum_source = "mise-versions"
+url = "https://github.com/common-repo/common-repo/releases/download/v0.38.4/common-repo-v0.38.4-x86_64-pc-windows-msvc.zip"
+url_api = "https://api.github.com/repos/common-repo/common-repo/releases/assets/711085971"
+
+[[tools."github:shakefu/yass"]]
+version = "0.11.0"
+backend = "github:shakefu/yass"
+specifiers = ["0.11.0"]
+
+[tools."github:shakefu/yass"."platforms.linux-arm64"]
+checksum = "sha256:38016d7dba68b8831d113dec21d00adcca6c1d7640b36b01c75e642710411671"
+checksum_source = "mise-versions"
+url = "https://github.com/shakefu/yass/releases/download/v0.11.0/yass_0.11.0_linux_arm64.tar.gz"
+url_api = "https://api.github.com/repos/shakefu/yass/releases/assets/730322257"
+
+[tools."github:shakefu/yass"."platforms.linux-arm64-musl"]
+checksum = "sha256:38016d7dba68b8831d113dec21d00adcca6c1d7640b36b01c75e642710411671"
+checksum_source = "mise-versions"
+url = "https://github.com/shakefu/yass/releases/download/v0.11.0/yass_0.11.0_linux_arm64.tar.gz"
+url_api = "https://api.github.com/repos/shakefu/yass/releases/assets/730322257"
+
+[tools."github:shakefu/yass"."platforms.linux-x64"]
+checksum = "sha256:aaed608dd60aa85708a19d933abc19e014a9ef11e9b939bd29b76d3a9dba01a5"
+checksum_source = "mise-versions"
+url = "https://github.com/shakefu/yass/releases/download/v0.11.0/yass_0.11.0_linux_amd64.tar.gz"
+url_api = "https://api.github.com/repos/shakefu/yass/releases/assets/730322256"
+
+[tools."github:shakefu/yass"."platforms.linux-x64-musl"]
+checksum = "sha256:aaed608dd60aa85708a19d933abc19e014a9ef11e9b939bd29b76d3a9dba01a5"
+checksum_source = "mise-versions"
+url = "https://github.com/shakefu/yass/releases/download/v0.11.0/yass_0.11.0_linux_amd64.tar.gz"
+url_api = "https://api.github.com/repos/shakefu/yass/releases/assets/730322256"
+
+[tools."github:shakefu/yass"."platforms.macos-arm64"]
+checksum = "sha256:db6bf522282ad3607206ba5b52277f9f1a772e81a31f1f8ffc52e9e339308c6c"
+checksum_source = "mise-versions"
+url = "https://github.com/shakefu/yass/releases/download/v0.11.0/yass_0.11.0_darwin_arm64.tar.gz"
+url_api = "https://api.github.com/repos/shakefu/yass/releases/assets/730322252"
+
+[tools."github:shakefu/yass"."platforms.macos-x64"]
+checksum = "sha256:bd081d8afa1f0a635b965377a4c684639c6f878e21280f7f5601a35a5faa2342"
+checksum_source = "mise-versions"
+url = "https://github.com/shakefu/yass/releases/download/v0.11.0/yass_0.11.0_darwin_amd64.tar.gz"
+url_api = "https://api.github.com/repos/shakefu/yass/releases/assets/730322250"
+
+[tools."github:shakefu/yass"."platforms.windows-x64"]
+checksum = "sha256:dce717fa08dafb19463124e0665a1c3884d26063619be9218f7f0bb1ce8cac8d"
+checksum_source = "mise-versions"
+url = "https://github.com/shakefu/yass/releases/download/v0.11.0/yass_0.11.0_windows_amd64.zip"
+url_api = "https://api.github.com/repos/shakefu/yass/releases/assets/730322275"
 
 [[tools.go]]
 version = "1.26.11"
@@ -247,8 +337,3 @@ checksum = "sha256:4a506e19a95a1bbf40f304b245446c32078c7be4d5b7e4cb412ea93a0cf8b
 url = "https://github.com/j178/prek/releases/download/v0.5.10/prek-x86_64-pc-windows-msvc.zip"
 url_api = "https://api.github.com/repos/j178/prek/releases/assets/707839436"
 provenance = "github-attestations"
-
-[[tools."ubi:shakefu/yass"]]
-version = "0.11.0"
-backend = "ubi:shakefu/yass"
-specifiers = ["0.11.0"]
