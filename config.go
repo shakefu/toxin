@@ -256,9 +256,6 @@ func New(opts ...Option) (*Config, error) {
 	return c, nil
 }
 
-// Prefix returns the normalized namespace prefix.
-func (c *Config) Prefix() string { return c.prefix }
-
 // Endpoints returns the resolved etcd member list the config is bound to.
 func (c *Config) Endpoints() []string { return c.client.Endpoints() }
 
