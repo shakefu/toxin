@@ -1,9 +1,15 @@
 # mise installs the dev toolchain; script/bootstrap runs mise install
-# (locked when mise.lock is present). Go's pin must stay in sync with
+# (locked when mise.lock is present) and CI installs the same cached
+# bundle via jdx/mise-action. Go's pin must stay in sync with
 # .go-version, which goenv and actions/setup-go read. The Docker trio
 # (colima, docker-cli, docker-compose) covers the daemon the
 # testcontainers-backed tests need: run `colima start` once, or use
 # Docker Desktop — bootstrap fails fast when no daemon answers.
+#
+# Pending shakefu/venom release binaries: the venom code generator is not
+# installable here yet (the 0.5.0 release ships no assets). Until it
+# does, regenerate venom_gen.go with:
+#   go install github.com/shakefu/venom/cmd/venom@6b6f57e && go generate ./...
 [tools]
 go = "1.26.11" # keep in sync with .go-version
 prek = "0.5.10"
@@ -11,4 +17,5 @@ cocogitto = "7.0.0"
 colima = "0.10.3"
 docker-cli = "29.9.3"
 docker-compose = "5.7.1"
-"ubi:shakefu/yass" = "0.11.0"
+"github:shakefu/yass" = "0.11.0"
+"github:common-repo/common-repo" = "0.38.4" # machinery maintenance; matches the Validate job
