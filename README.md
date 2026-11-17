@@ -162,5 +162,4 @@ tidy/fmt/vulncheck, markdownlint, shellcheck, shfmt, actionlint, zizmor,
 and conventional-commit enforcement. Commits follow [Conventional
 Commits](https://www.conventionalcommits.org/); merging a `feat:` or
 `fix:` to `main` cuts a release automatically (cocogitto, see
-`.github/workflows/release.yaml`). The repo has no release tag yet — cut
-the first one by dispatching that workflow with an explicit version.
+`.github/workflows/release.yaml`).
