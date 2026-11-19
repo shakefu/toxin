@@ -212,51 +212,51 @@ url = "https://github.com/common-repo/common-repo/releases/download/v0.38.4/comm
 url_api = "https://api.github.com/repos/common-repo/common-repo/releases/assets/711085971"
 
 [[tools."github:shakefu/yass"]]
-version = "0.11.0"
+version = "0.13.3"
 backend = "github:shakefu/yass"
-specifiers = ["0.11.0"]
+specifiers = ["0.13.3"]
 
 [tools."github:shakefu/yass"."platforms.linux-arm64"]
-checksum = "sha256:38016d7dba68b8831d113dec21d00adcca6c1d7640b36b01c75e642710411671"
+checksum = "sha256:ea2376a5161e176ffd84d70050b4f022c8ed3421e89f0a7ef04b897241a0adba"
 checksum_source = "mise-versions"
-url = "https://github.com/shakefu/yass/releases/download/v0.11.0/yass_0.11.0_linux_arm64.tar.gz"
-url_api = "https://api.github.com/repos/shakefu/yass/releases/assets/730322257"
+url = "https://github.com/shakefu/yass/releases/download/v0.13.3/yass_0.13.3_linux_arm64.tar.gz"
+url_api = "https://api.github.com/repos/shakefu/yass/releases/assets/758043022"
 
 [tools."github:shakefu/yass"."platforms.linux-arm64-musl"]
-checksum = "sha256:38016d7dba68b8831d113dec21d00adcca6c1d7640b36b01c75e642710411671"
+checksum = "sha256:ea2376a5161e176ffd84d70050b4f022c8ed3421e89f0a7ef04b897241a0adba"
 checksum_source = "mise-versions"
-url = "https://github.com/shakefu/yass/releases/download/v0.11.0/yass_0.11.0_linux_arm64.tar.gz"
-url_api = "https://api.github.com/repos/shakefu/yass/releases/assets/730322257"
+url = "https://github.com/shakefu/yass/releases/download/v0.13.3/yass_0.13.3_linux_arm64.tar.gz"
+url_api = "https://api.github.com/repos/shakefu/yass/releases/assets/758043022"
 
 [tools."github:shakefu/yass"."platforms.linux-x64"]
-checksum = "sha256:aaed608dd60aa85708a19d933abc19e014a9ef11e9b939bd29b76d3a9dba01a5"
+checksum = "sha256:46b930d526160a82514358aa45f7dd83a3c6c9407571b32aff1fc9b3369703b9"
 checksum_source = "mise-versions"
-url = "https://github.com/shakefu/yass/releases/download/v0.11.0/yass_0.11.0_linux_amd64.tar.gz"
-url_api = "https://api.github.com/repos/shakefu/yass/releases/assets/730322256"
+url = "https://github.com/shakefu/yass/releases/download/v0.13.3/yass_0.13.3_linux_amd64.tar.gz"
+url_api = "https://api.github.com/repos/shakefu/yass/releases/assets/758043032"
 
 [tools."github:shakefu/yass"."platforms.linux-x64-musl"]
-checksum = "sha256:aaed608dd60aa85708a19d933abc19e014a9ef11e9b939bd29b76d3a9dba01a5"
+checksum = "sha256:46b930d526160a82514358aa45f7dd83a3c6c9407571b32aff1fc9b3369703b9"
 checksum_source = "mise-versions"
-url = "https://github.com/shakefu/yass/releases/download/v0.11.0/yass_0.11.0_linux_amd64.tar.gz"
-url_api = "https://api.github.com/repos/shakefu/yass/releases/assets/730322256"
+url = "https://github.com/shakefu/yass/releases/download/v0.13.3/yass_0.13.3_linux_amd64.tar.gz"
+url_api = "https://api.github.com/repos/shakefu/yass/releases/assets/758043032"
 
 [tools."github:shakefu/yass"."platforms.macos-arm64"]
-checksum = "sha256:db6bf522282ad3607206ba5b52277f9f1a772e81a31f1f8ffc52e9e339308c6c"
+checksum = "sha256:ea4f43f197cd78c51d405f347b5a7dad2368217c9959d4b30cf2a5cc0ec239fa"
 checksum_source = "mise-versions"
-url = "https://github.com/shakefu/yass/releases/download/v0.11.0/yass_0.11.0_darwin_arm64.tar.gz"
-url_api = "https://api.github.com/repos/shakefu/yass/releases/assets/730322252"
+url = "https://github.com/shakefu/yass/releases/download/v0.13.3/yass_0.13.3_darwin_arm64.tar.gz"
+url_api = "https://api.github.com/repos/shakefu/yass/releases/assets/758043026"
 
 [tools."github:shakefu/yass"."platforms.macos-x64"]
-checksum = "sha256:bd081d8afa1f0a635b965377a4c684639c6f878e21280f7f5601a35a5faa2342"
+checksum = "sha256:6bb3141d2c099d3fad88cd7641ee95b66ff3b32ef6ddb4952eee32d5141b3375"
 checksum_source = "mise-versions"
-url = "https://github.com/shakefu/yass/releases/download/v0.11.0/yass_0.11.0_darwin_amd64.tar.gz"
-url_api = "https://api.github.com/repos/shakefu/yass/releases/assets/730322250"
+url = "https://github.com/shakefu/yass/releases/download/v0.13.3/yass_0.13.3_darwin_amd64.tar.gz"
+url_api = "https://api.github.com/repos/shakefu/yass/releases/assets/758043025"
 
 [tools."github:shakefu/yass"."platforms.windows-x64"]
-checksum = "sha256:dce717fa08dafb19463124e0665a1c3884d26063619be9218f7f0bb1ce8cac8d"
+checksum = "sha256:2921356656abf365605f77f2e7cc21bacb78e21b0e441da5808900fbf396febd"
 checksum_source = "mise-versions"
-url = "https://github.com/shakefu/yass/releases/download/v0.11.0/yass_0.11.0_windows_amd64.zip"
-url_api = "https://api.github.com/repos/shakefu/yass/releases/assets/730322275"
+url = "https://github.com/shakefu/yass/releases/download/v0.13.3/yass_0.13.3_windows_amd64.zip"
+url_api = "https://api.github.com/repos/shakefu/yass/releases/assets/758043064"
 
 [[tools.go]]
 version = "1.26.11"
