@@ -88,20 +88,38 @@ func TestNewTrimsWhitespaceAndDropsEmptyMembers(t *testing.T) {
 	}
 }
 
-// etcd.Client INPUT: treat an absent member list as the single member
-// 127.0.0.1:2379.
-func TestNewDefaultsToLoopbackWhenMemberListAbsent(t *testing.T) {
+// etcd.Client RETURN: when the resolved member list is empty, return a nil
+// client and a nil error without loading TLS material or processing auth.
+func TestNewReturnsNilClientWhenNoMembersRemain(t *testing.T) {
 	clearEtcdEnv(t)
+	warnings := captureWarnings(t)
+	t.Setenv("TOXIN_SSL_CA", filepath.Join(t.TempDir(), "missing.pem"))
+	t.Setenv("TOXIN_AUTH", "justauser")
 	for _, args := range [][]string{nil, {" ,, "}} {
 		c, err := New(args...)
 		if err != nil {
 			t.Fatalf("New(%v): %v", args, err)
 		}
-		want := []string{"http://127.0.0.1:2379"}
-		if got := c.Endpoints(); !reflect.DeepEqual(got, want) {
-			t.Errorf("New(%v) endpoints = %v, want %v", args, got, want)
+		if c != nil {
+			t.Errorf("New(%v) client = %v, want nil", args, c)
 		}
-		_ = c.Close()
+	}
+	if warnings.String() != "" {
+		t.Errorf("New without members logged authentication warning %q", warnings.String())
+	}
+}
+
+// etcd.Client RETURN: a blank-only non-empty TOXIN_ETCD overrides a valid
+// programmatic member list and leaves no members, returning no client.
+func TestNewBlankOnlyTOXINETCDOverridesProgrammaticMembers(t *testing.T) {
+	clearEtcdEnv(t)
+	t.Setenv("TOXIN_ETCD", " ,, ")
+	c, err := New("10.1.1.1:2379")
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if c != nil {
+		t.Errorf("New client = %v, want nil", c)
 	}
 }
 

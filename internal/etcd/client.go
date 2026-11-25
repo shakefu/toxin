@@ -25,7 +25,6 @@ import (
 const (
 	requestTimeout = 5 * time.Second
 	maxAttempts    = 3
-	defaultMember  = "127.0.0.1:2379"
 )
 
 // warningLogger receives this layer's warnings, such as an incomplete
@@ -51,11 +50,12 @@ type Client struct {
 // single comma-separated string or as one member per argument (or a mix);
 // each member is host, host:port, scheme://host:port, or
 // scheme://user:password@host:port. Surrounding whitespace is trimmed from
-// each member and entries that trim to nothing are dropped; an absent
-// member list resolves to the single member 127.0.0.1:2379. TOXIN_ETCD,
-// when set, is used in place of any programmatic member list, and
-// TOXIN_AUTH, TOXIN_SSL_CA, TOXIN_SSL_CERT and TOXIN_SSL_KEY supply the
-// credentials and TLS material.
+// each member and entries that trim to nothing are dropped. If no members
+// remain, New returns a nil client and no error without loading TLS material,
+// processing authentication, or constructing an underlying client.
+// TOXIN_ETCD, when non-empty, is used in place of any programmatic member
+// list, and TOXIN_AUTH, TOXIN_SSL_CA, TOXIN_SSL_CERT and TOXIN_SSL_KEY supply
+// the credentials and TLS material.
 func New(members ...string) (*Client, error) {
 	list := members
 	if env := os.Getenv("TOXIN_ETCD"); env != "" {
@@ -73,7 +73,7 @@ func New(members ...string) (*Client, error) {
 		}
 	}
 	if len(raws) == 0 {
-		raws = []string{defaultMember}
+		return nil, nil
 	}
 
 	tlsCfg, tlsConfigured, err := loadTLS()

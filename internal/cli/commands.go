@@ -69,16 +69,27 @@ func commandByName(name string) (commandSpec, bool) {
 	return commandSpec{}, false
 }
 
+const defaultEtcdHost = "127.0.0.1:2379"
+
 // newConfig constructs a Config on prefix under the resolved global
 // options: inheritance off with -n, the log level stepped down per -v
-// repeat. clear additionally enables clearing.
+// repeat. clear additionally enables clearing. Management commands retain
+// their loopback default independently of the library's host defaults.
 func newConfig(prefix string, allowClear bool) (*toxin.Config, error) {
-	return toxin.New(
+	conf, err := toxin.New(
 		toxin.WithPrefix(prefix),
 		toxin.WithInherit(!runGlobals.noInherit),
 		toxin.WithLogLevel(runGlobals.level()),
 		toxin.WithAllowClear(allowClear),
+		toxin.WithHosts(defaultEtcdHost),
 	)
+	if err != nil {
+		return nil, err
+	}
+	if len(conf.Endpoints()) == 0 {
+		return nil, errors.New("etcd is not configured")
+	}
+	return conf, nil
 }
 
 // printJSON prints v as two-space indented JSON, the shape every subcommand

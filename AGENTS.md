@@ -1,9 +1,9 @@
 # toxin
 
-Go port of pyconfig (Python) and jetconfig (Node.js): etcd3-backed
-configuration addressed by dot-notation keys. Spec-first — the yass spec
-set is the behavior contract. Porting references live in the sibling
-repos `../pyconfig` and `../jetconfig`.
+Go port of pyconfig (Python) and jetconfig (Node.js): configuration
+addressed by dot-notation keys, with optional etcd3 storage and in-process
+sources. Spec-first — the yass spec set is the behavior contract. Porting
+references live in the sibling repos `../pyconfig` and `../jetconfig`.
 
 ## Layout
 

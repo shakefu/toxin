@@ -10,12 +10,10 @@ import (
 )
 
 // 20-api@toxin.New::INPUT: the construction defaults — prefix "config/",
-// member list 127.0.0.1:2379, caching on, case sensitivity off,
-// inheritance on with inherit key "config.inherit" and depth two,
-// watching off, clearing off, log level critical.
+// no etcd member list, caching on, case sensitivity off, inheritance on
+// with inherit key "config.inherit" and depth two, watching off, clearing
+// off, log level critical.
 func TestNewDefaults(t *testing.T) {
-	// The default member list is only consulted with no programmatic list
-	// and no TOXIN_ETCD; no live connection is needed to observe it.
 	clearToxinEnv(t)
 	c, err := New()
 	if err != nil {
@@ -25,8 +23,11 @@ func TestNewDefaults(t *testing.T) {
 	if c.prefix != "config/" {
 		t.Errorf("prefix = %q, want %q", c.prefix, "config/")
 	}
-	if got := c.Endpoints(); len(got) != 1 || got[0] != "http://127.0.0.1:2379" {
-		t.Errorf("endpoints = %v, want [http://127.0.0.1:2379]", got)
+	if c.client != nil {
+		t.Error("default construction created an etcd client, want no client")
+	}
+	if got := c.Endpoints(); got == nil || len(got) != 0 {
+		t.Errorf("endpoints = %v, want a non-nil empty list", got)
 	}
 	if !c.cacheOn {
 		t.Error("caching default = off, want on")
@@ -204,9 +205,8 @@ func TestNewTOXINEtcdOverridesProgrammaticHosts(t *testing.T) {
 }
 
 // 10-etcd3@etcd.Client::INPUT, bound by toxin.New's whole-spec CONFORMS:
-// the member list may be a single comma-separated string, entries that
-// trim to nothing are dropped, and an absent list resolves to
-// 127.0.0.1:2379.
+// the member list may be a single comma-separated string, and entries that
+// trim to nothing are dropped.
 func TestNewMemberListForms(t *testing.T) {
 	c := newTestConfig(t, WithHosts(" "+testutil.Etcd(t)+" , ,"+testutil.Etcd(t)))
 	got := c.Endpoints()

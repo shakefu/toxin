@@ -2,11 +2,11 @@
 ---
 description: >
   toxin is a Go port of pyconfig (Python) and jetconfig (Node.js):
-  configuration stored in an etcd v3 cluster under a namespace prefix,
-  addressed by dot-notation keys, case-insensitive by default, with
-  JSON-typed values, configuration inheritance, watching, and a command
-  line tool. The library API owns 20-api, the etcd v3 wire behavior owns
-  10-etcd3, and the command line tool owns 30-cli.
+  configuration addressed by dot-notation keys under a namespace prefix,
+  case-insensitive by default, with optional etcd v3 storage, in-process
+  values, JSON-typed values, configuration inheritance, watching, and a
+  command line tool. The library API owns 20-api, the etcd v3 wire behavior
+  owns 10-etcd3, and the command line tool owns 30-cli.
 version: v1
 ---
 design: EnvNaming
@@ -64,9 +64,17 @@ RETURN:
     USES: 10-etcd3@ValueEncoding
   - MUST: 'return a caller-supplied default when a key is unset'
 ERROR:
-  - MUST: 'surface etcd failures to library callers as errors, and to command line users as a message on stderr with exit status one'
+  - WHEN: 'etcd is configured and an etcd operation fails'
+    MUST: 'surface the failure to library callers as an error, and to command line users as a message on stderr with exit status one'
 SIDE-EFFECT:
-  - MUST: 'store and read configuration in an etcd v3 cluster, version 3.3 or newer, over gRPC'
+  - WHEN: 'etcd is configured'
+    MUST: 'store and read configuration in an etcd v3 cluster, version 3.3 or newer, over gRPC'
+  - WHEN: 'etcd is not configured'
+    MUST: 'resolve configuration from in-process values, supplied maps, the file cache, and caller-supplied defaults'
+  - WHEN: 'etcd is not configured'
+    MUST-NOT: 'create an etcd client or dial a cluster'
+  - WHEN: 'etcd is not configured'
+    MUST-NOT: 'start a watcher or emit a log message'
   - MUST-NOT: 'read or write any etcd key outside the configured namespace prefix'
 INVARIANT:
   - USES: EnvNaming

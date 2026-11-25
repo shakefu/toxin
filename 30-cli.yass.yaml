@@ -42,6 +42,10 @@ INPUT:
     MUST: 'lower the log level one step per repeat from critical toward silly and hold it at silly'
   - WHEN: 'a subcommand is given and -n is passed'
     MUST: 'construct the configuration with inheritance disabled'
+  - WHEN: 'a management subcommand constructs its Config and TOXIN_ETCD is unset or set to exactly the empty string'
+    MUST: 'pass the CLI-local programmatic host 127.0.0.1:2379'
+  - WHEN: 'a management subcommand constructs its Config and TOXIN_ETCD is non-empty, including whitespace-only or comma-only'
+    MUST: 'let TOXIN_ETCD override the CLI-local programmatic host'
 RETURN:
   - WHEN: '--help or -h is given'
     MUST: 'print the general usage, or the usage of the named command, and exit zero'
@@ -57,6 +61,9 @@ ERROR:
     MUST: 'print "<argument> argument is required" with the command usage to stderr and exit one'
   - WHEN: 'an unknown flag, including a scanner-only flag, is given in command mode'
     MUST: 'print the parse error and the usage to stderr and exit two'
+  - WHEN: 'a management subcommand constructs a Config with no effective etcd endpoints'
+    MUST: 'return the error exactly "etcd is not configured"'
+    SEE: 20-api@Config.Endpoints
 INVARIANT:
   - MUST: 'resolve --help or -h before --version, and --version before subcommand dispatch'
 ---

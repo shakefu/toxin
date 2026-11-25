@@ -1,8 +1,8 @@
-// Package toxin is an etcd3-backed configuration library addressed by
-// dot-notation keys under a namespace prefix: construct a Config bound to a
-// prefix and a cluster with New, then Get, Set, Dump, Load, List, Clear and
-// Watch settings through it. Default returns the process-wide instance the
-// package-level shortcuts operate on.
+// Package toxin is a configuration library addressed by dot-notation keys
+// under a namespace prefix, with optional etcd3 storage. Construct a Config
+// with New, then Get, Set, Dump, Load, List, Clear and Watch settings through
+// it. Default returns the process-wide instance the package-level shortcuts
+// operate on.
 package toxin
 
 import (
@@ -120,8 +120,9 @@ func WithFileCache(dir string) Option {
 	return func(o *options) { o.fileCache = dir }
 }
 
-// Config is a configuration bound to one namespace prefix in an etcd v3
-// cluster. Its methods are safe for concurrent use.
+// Config is a configuration bound to one namespace prefix, backed by an
+// etcd v3 cluster when hosts are configured and by in-process sources
+// otherwise. Its methods are safe for concurrent use.
 type Config struct {
 	prefix        string // normalized: "config/" or the root "/"
 	client        *etcd.Client
@@ -152,17 +153,17 @@ type Config struct {
 	watcher   *etcd.Watcher
 }
 
-// New constructs a Config bound to the namespace prefix and the cluster.
-//
-// The member list defaults to 127.0.0.1:2379 (TOXIN_ETCD overrides any
-// programmatic list), the prefix to "config/", caching on, case
+// New constructs a Config bound to the namespace prefix. Etcd is enabled
+// only by WithHosts or TOXIN_ETCD; with no effective members the Config uses
+// in-process sources and creates no client. TOXIN_ETCD overrides any
+// programmatic list. Other defaults are prefix "config/", caching on, case
 // sensitivity off, inheritance on with inherit key "config.inherit" and
-// depth two, watching off, clearing off, and the log level to critical.
+// depth two, watching off, clearing off, and log level critical.
 // TOXIN_LOGLEVEL overrides the log level option and TOXIN_CACHE supplies
 // the file cache directory; TOXIN_PREFIX, TOXIN_WATCH and
 // TOXIN_INHERIT_DEPTH are consulted only when the corresponding option is
-// not supplied. Watching starts at construction when enabled, and a
-// configured file cache directory is created and opened at construction.
+// not supplied. Watching starts at construction when enabled with etcd, and
+// a configured file cache directory is created and opened at construction.
 func New(opts ...Option) (*Config, error) {
 	o := options{
 		prefix:       "config/",
@@ -256,8 +257,14 @@ func New(opts ...Option) (*Config, error) {
 	return c, nil
 }
 
-// Endpoints returns the resolved etcd member list the config is bound to.
-func (c *Config) Endpoints() []string { return c.client.Endpoints() }
+// Endpoints returns the resolved etcd member list the config is bound to,
+// or an empty list when etcd is not configured.
+func (c *Config) Endpoints() []string {
+	if c.client == nil {
+		return []string{}
+	}
+	return c.client.Endpoints()
+}
 
 // openFileCacheDir creates the file cache directory and opens a file in it,
 // so an unusable cache location surfaces at construction.

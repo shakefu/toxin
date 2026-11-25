@@ -3,21 +3,17 @@ package toxin
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/shakefu/toxin/internal/testutil"
 )
 
-// The process-wide default instance is shared state: this is the one test
-// that may call Default and the package-level shortcuts, and it sets the
-// environment they construct from before the first use.
-//
 // 20-api@toxin.Default::RETURN: one process-wide Config shared by every
 // caller, constructed and loaded on first use rather than at package
 // initialization; the package-level Get, Set, GetStrict and Clear, reload
 // and reload hook registration operate on the shared instance.
 func TestDefaultSharedInstanceAndPackageShortcuts(t *testing.T) {
+	isolateDefault(t)
 	cacheDir := t.TempDir()
 	clearToxinEnv(t)
 	t.Setenv("TOXIN_ETCD", testutil.Etcd(t))
@@ -121,16 +117,63 @@ func TestDefaultSharedInstanceAndPackageShortcuts(t *testing.T) {
 	})
 }
 
-// 20-api@toxin.Default::RETURN: the process-wide instance is constructed
-// and loaded on first use, not at package initialization — proven by the
-// environment above deciding its prefix. A second construction cannot be
-// forced in one process; the shared identity is covered above.
-func TestDefaultPrefixCameFromEnvironment(t *testing.T) {
-	c, err := Default()
+// 20-api@toxin.Default::RETURN: without etcd the first-use load succeeds and
+// the package shortcuts and reloads operate on in-process settings.
+func TestDefaultWithoutEtcdUsesInProcessShortcuts(t *testing.T) {
+	isolateDefault(t)
+	clearToxinEnv(t)
+
+	first, err := Default()
 	if err != nil {
-		t.Fatalf("Default: %v", err)
+		t.Fatalf("Default without etcd: %v", err)
 	}
-	if !strings.HasSuffix(c.prefix, "/") || c.prefix != "default-test/" {
-		t.Errorf("shared instance prefix = %q, want the one its environment gave it", c.prefix)
+	if first.client != nil {
+		t.Fatal("Default without etcd created a client")
 	}
+	second, err := Default()
+	if err != nil || second != first {
+		t.Errorf("second Default = (%p, %v), want the shared %p", second, err, first)
+	}
+	if err := Set("app.key", "local"); err != nil {
+		t.Fatalf("package Set without etcd: %v", err)
+	}
+	got, err := GetStrict("app.key")
+	if err != nil || got != "local" {
+		t.Errorf("package GetStrict without etcd = (%v, %v), want (local, nil)", got, err)
+	}
+
+	hooks := 0
+	ReloadHook(func() { hooks++ })
+	if err := Reload(false); err != nil {
+		t.Fatalf("Reload(false) without etcd: %v", err)
+	}
+	got, err = Get("app.key", nil)
+	if err != nil || got != "local" {
+		t.Errorf("Reload(false) discarded the package setting: (%v, %v)", got, err)
+	}
+	if err := Reload(true); err != nil {
+		t.Fatalf("Reload(true) without etcd: %v", err)
+	}
+	got, err = Get("app.key", "fallback")
+	if err != nil || got != "fallback" {
+		t.Errorf("Reload(true) left (%v, %v), want the fallback", got, err)
+	}
+	if hooks != 2 {
+		t.Errorf("package reload hooks ran %d times, want 2", hooks)
+	}
+}
+
+// isolateDefault gives each Default test a fresh process-wide instance and
+// restores the prior state afterward. These tests must not run in parallel.
+func isolateDefault(t *testing.T) {
+	t.Helper()
+	defaultMu.Lock()
+	savedConf, savedErr := defaultConf, defaultErr
+	defaultConf, defaultErr = nil, nil
+	defaultMu.Unlock()
+	t.Cleanup(func() {
+		defaultMu.Lock()
+		defaultConf, defaultErr = savedConf, savedErr
+		defaultMu.Unlock()
+	})
 }

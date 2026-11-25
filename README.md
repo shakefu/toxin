@@ -1,26 +1,27 @@
 # toxin
 
-etcd3 based cross-platform configuration
+Cross-platform configuration with optional etcd3 storage
 
-Go port of pyconfig (Python) and jetconfig (Node.js): settings live in
-etcd v3 under a namespace prefix and are addressed as dot-notation keys —
-the key `app.setting` under the prefix `config/` names the etcd key
-`/config/app.setting`. A `Config` caches reads, can inherit from a parent
-namespace, watches etcd for changes, and mirrors itself to a file cache.
-The `toxin` binary manages namespaces and doubles as a scanner over Go
-source.
+Go port of pyconfig (Python) and jetconfig (Node.js): settings are
+addressed as dot-notation keys under a namespace prefix. With etcd
+configured, the key `app.setting` under the prefix `config/` names the etcd
+key `/config/app.setting`. Without etcd, a `Config` uses in-process values,
+supplied maps, its file cache, and call-site defaults without dialing or
+logging. A `Config` can inherit from a parent namespace, watch etcd for
+changes, and mirror itself to a file cache. The `toxin` binary manages
+namespaces and doubles as a scanner over Go source.
 
 ## Library usage
 
 Construct a `Config` with options; unset options take defaults (prefix
-`config/`, members `127.0.0.1:2379`, caching on, case sensitivity off,
-inheritance on with inherit key `config.inherit` and depth two, watching
-off, clearing off, log level critical).
+`config/`, no etcd members, caching on, case sensitivity off, inheritance
+on with inherit key `config.inherit` and depth two, watching off, clearing
+off, log level critical). Supply `WithHosts` or `TOXIN_ETCD` to enable etcd.
 
 ```go
 config, err := toxin.New(
 	toxin.WithPrefix("myapp/"),                              // default "config/"
-	toxin.WithHosts("etcd1.example.com:2379", "etcd2:2379"), // default 127.0.0.1:2379
+	toxin.WithHosts("etcd1.example.com:2379", "etcd2:2379"), // enables etcd
 	toxin.WithWatch(true),                                   // start the watcher now
 )
 if err != nil {
@@ -39,12 +40,13 @@ the error `No setting "<key>"`:
 ```go
 env, err := config.Get("app.env", "production") // default when unset
 env, err = config.GetStrict("app.env")          // error when unset
-err = config.Set("http.port", 9090)             // writes etcd, then the cache
+err = config.Set("http.port", 9090)             // etcd when configured; cache otherwise
 ```
 
-Values are JSON-typed: a string crosses verbatim, anything else as its
-JSON encoding; a read decodes JSON, so the number above comes back as a
-`json.Number` and a plain non-JSON string as itself.
+With etcd configured, values are JSON-typed: a string crosses verbatim,
+anything else as its JSON encoding; a read decodes JSON, so the number above
+comes back as a `json.Number` and a plain non-JSON string as itself.
+Without etcd, `Set` stores the original typed value in the in-process cache.
 
 One process-wide `Config` is shared by every caller, constructed on first
 use, with package-level shortcuts that operate on it:
@@ -58,11 +60,11 @@ env, err = toxin.Get("app.env", "development")
 `toxin.GetStrict`, `toxin.Clear`, `toxin.Reload` and `toxin.ReloadHook`
 operate on the same instance.
 
-With watching enabled — `toxin.WithWatch(true)` at construction, or
-`config.Watch()` later — the watcher keeps the cache current: set events
-decode into the cache, deleted keys drop out, and `config.Close()` stops
-it. Watching needs caching; a watch on a cacheless config is skipped with
-a warning.
+With watching enabled and etcd configured — `toxin.WithWatch(true)` at
+construction, or `config.Watch()` later — the watcher keeps the cache
+current: set events decode into the cache, deleted keys drop out, and
+`config.Close()` stops it. Watching needs caching; a watch on a cacheless
+config is skipped with a warning. Without etcd, watching is a silent no-op.
 
 ## CLI usage
 
@@ -78,6 +80,11 @@ toxin clear config/                # clear the namespace; a second operand is
                                    # rejected with "You forgot a slash didn't you?"
 toxin load config/ settings.json   # load a JSON file into the namespace
 ```
+
+Management commands default to `127.0.0.1:2379` when `TOXIN_ETCD` is unset
+or empty, independently of the library's optional-etcd default. A non-empty
+`TOXIN_ETCD` overrides that default; one containing no usable members fails
+with `etcd is not configured` rather than running in local-only mode.
 
 Global options in command mode: `-n/--no-inherit` disables inheritance,
 `-v/--verbose` (repeatable) steps the log level from critical toward
@@ -107,7 +114,7 @@ variables.
 
 | Variable | Meaning | Default |
 |---|---|---|
-| `TOXIN_ETCD` | Comma-separated etcd member list; each entry `host[:port]`, optionally prefixed `scheme://` and `user:password@`. Overrides programmatic hosts. | `127.0.0.1:2379` |
+| `TOXIN_ETCD` | Comma-separated etcd member list; each entry `host[:port]`, optionally prefixed `scheme://` and `user:password@`. Overrides programmatic hosts. | No library client; management commands use `127.0.0.1:2379` |
 | `TOXIN_PREFIX` | Namespace prefix for keys. | `config/` |
 | `TOXIN_SSL_CA` | CA certificate file path; the file may hold concatenated PEM. | |
 | `TOXIN_SSL_CERT` | Client certificate file path. | |
