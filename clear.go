@@ -14,7 +14,8 @@ import (
 // With cacheOnly the cache alone is emptied and etcd is untouched. A
 // namespace that is already empty succeeds without error and leaves the
 // cache as it is; the cache is emptied when cacheOnly is set or the
-// namespace delete removed entries.
+// namespace delete removed entries. Without configured etcd, an allowed
+// Clear empties the cache without a namespace delete.
 func (c *Config) Clear(opts ...CallOption) error {
 	o := clearDefaults(opts)
 
@@ -23,6 +24,11 @@ func (c *Config) Clear(opts ...CallOption) error {
 	}
 
 	if o.cacheOnly {
+		c.emptyCache()
+		return nil
+	}
+
+	if c.client == nil {
 		c.emptyCache()
 		return nil
 	}

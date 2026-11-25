@@ -40,24 +40,35 @@ content: |
 ---
 spec: etcd.Client
 INPUT:
-  - MUST: 'accept a member list as a single comma-separated string or a list of member strings'
+  - MUST: 'accept a member list as a single comma-separated string or a list of member strings, splitting every argument on commas'
   - MUST: 'trim surrounding whitespace from each member and drop entries that trim to nothing'
-  - WHEN: '`TOXIN_ETCD` is set'
+  - WHEN: '`TOXIN_ETCD` is non-empty'
     MUST: 'use it in place of any programmatic member list'
     USES: root@EnvNaming
-  - MUST: 'treat an absent member list as the single member 127.0.0.1:2379'
   - MUST: 'accept each member as `host`, `host:port`, `scheme://host:port`, or `scheme://user:password@host:port`'
   - MUST: 'default the scheme of a member without one to http, or to https when TLS material is configured'
-  - WHEN: 'a member or `TOXIN_AUTH` carries user:password credentials'
+  - WHEN: 'the resolved member list is non-empty and a member or `TOXIN_AUTH` carries user:password credentials'
     MUST: 'use them for basic authentication'
     USES: root@EnvNaming
-  - WHEN: '`TOXIN_AUTH` carries no colon'
+  - WHEN: 'the resolved member list is non-empty and `TOXIN_AUTH` carries no colon'
     MUST: 'log a warning and ignore the incomplete credentials'
     USES: root@EnvNaming
-  - MUST: 'load the contents of `TOXIN_SSL_CA`, `TOXIN_SSL_CERT` and `TOXIN_SSL_KEY` as the TLS credentials when set, concatenating the contents of the comma-separated `TOXIN_SSL_CA` paths with newlines'
+  - WHEN: 'the resolved member list is non-empty'
+    MUST: 'load the contents of `TOXIN_SSL_CA`, `TOXIN_SSL_CERT` and `TOXIN_SSL_KEY` as the TLS credentials when set, concatenating the contents of the comma-separated `TOXIN_SSL_CA` paths with newlines'
     USES: root@EnvNaming
 RETURN:
-  - MUST: 'yield a client that holds the resolved member list and credentials and serves every read, write, delete and watch'
+  - WHEN: 'the resolved member list is non-empty'
+    MUST: 'yield a client that holds the resolved member list and credentials and serves every read, write, delete and watch'
+  - WHEN: 'the resolved member list is empty'
+    MUST: 'return a nil client and a nil error'
+  - WHEN: 'the resolved member list is empty'
+    MUST-NOT: 'load TLS material'
+  - WHEN: 'the resolved member list is empty'
+    MUST-NOT: 'validate authentication credentials'
+  - WHEN: 'the resolved member list is empty'
+    MUST-NOT: 'log authentication warnings'
+  - WHEN: 'the resolved member list is empty'
+    MUST-NOT: 'construct the underlying etcd client'
 ERROR:
   - WHEN: 'a member matches none of `host`, `host:port`, `scheme://host:port`, or `scheme://user:password@host:port`'
     MUST: 'reject with an error naming the member'

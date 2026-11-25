@@ -2,11 +2,88 @@ package cli
 
 import (
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/shakefu/toxin"
 )
+
+// clearNewConfigEnv isolates direct construction tests from credentials,
+// TLS, watches, file caches and other process configuration.
+func clearNewConfigEnv(t *testing.T) {
+	t.Helper()
+	for _, name := range []string{
+		"TOXIN_ETCD", "TOXIN_AUTH", "TOXIN_SSL_CA", "TOXIN_SSL_CERT",
+		"TOXIN_SSL_KEY", "TOXIN_LOGLEVEL", "TOXIN_CACHE", "TOXIN_WATCH",
+		"TOXIN_INHERIT_DEPTH",
+	} {
+		t.Setenv(name, "")
+	}
+}
+
+// cli.Main INPUT: management commands retain their loopback programmatic
+// host when TOXIN_ETCD is unset or exactly empty.
+func TestNewConfigDefaultsToLoopback(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		unset bool
+	}{
+		{name: "unset", unset: true},
+		{name: "exactly empty"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			clearNewConfigEnv(t)
+			if tc.unset {
+				if err := os.Unsetenv("TOXIN_ETCD"); err != nil {
+					t.Fatalf("unset TOXIN_ETCD: %v", err)
+				}
+			}
+
+			conf, err := newConfig("config/", false)
+			if err != nil {
+				t.Fatalf("newConfig: %v", err)
+			}
+			got := conf.Endpoints()
+			if len(got) != 1 || got[0] != "http://127.0.0.1:2379" {
+				t.Errorf("endpoints = %v, want [http://127.0.0.1:2379]", got)
+			}
+		})
+	}
+}
+
+// cli.Main INPUT: a non-empty TOXIN_ETCD overrides the management command's
+// programmatic host.
+func TestNewConfigEnvironmentOverridesDefaultHost(t *testing.T) {
+	clearNewConfigEnv(t)
+	const endpoint = "http://192.0.2.1:2379"
+	t.Setenv("TOXIN_ETCD", endpoint)
+
+	conf, err := newConfig("config/", false)
+	if err != nil {
+		t.Fatalf("newConfig: %v", err)
+	}
+	got := conf.Endpoints()
+	if len(got) != 1 || got[0] != endpoint {
+		t.Errorf("endpoints = %v, want [%s]", got, endpoint)
+	}
+}
+
+// cli.Main ERROR: a non-empty TOXIN_ETCD that yields no effective endpoints
+// returns the exact configuration error rather than silently using loopback.
+func TestNewConfigRejectsNoEffectiveHost(t *testing.T) {
+	for _, value := range []string{" \t ", " , , "} {
+		t.Run(value, func(t *testing.T) {
+			clearNewConfigEnv(t)
+			t.Setenv("TOXIN_ETCD", value)
+
+			_, err := newConfig("config/", false)
+			if err == nil || err.Error() != "etcd is not configured" {
+				t.Errorf("newConfig error = %v, want %q", err, "etcd is not configured")
+			}
+		})
+	}
+}
 
 // cli.Get RETURN: prints the value returned for the key as two-space
 // indented JSON.

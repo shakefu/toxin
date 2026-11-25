@@ -9,9 +9,13 @@ import (
 
 // Watch starts the watcher that keeps the cache synchronized with etcd
 // changes under the prefix. At most one watcher runs per config; with
-// caching disabled watching is skipped with a warning. The watcher stops
-// when the config is closed.
+// caching disabled watching is skipped with a warning. Without configured
+// etcd, watching is skipped silently. The watcher stops when the config is
+// closed.
 func (c *Config) Watch() {
+	if c.client == nil {
+		return
+	}
 	if !c.cacheOn {
 		c.log.Warnf("Cache not enabled, skipping watch...")
 		return

@@ -13,9 +13,13 @@ import (
 // With dirOnly (the default) only directory children are returned, without
 // a trailing slash; with dirOnly unset, leaf keys come back as-is and
 // directory keys with a trailing slash. Nothing under the namespace yields
-// an empty list.
+// an empty list. Without configured etcd, List returns an empty list without
+// consulting the cache.
 func (c *Config) List(key string, opts ...CallOption) ([]string, error) {
 	o := listDefaults(opts)
+	if c.client == nil {
+		return []string{}, nil
+	}
 
 	addr := etcd.TrimKey(c.prefix + c.coerceKey(key))
 	entries, err := c.client.Read(context.Background(), addr, false)

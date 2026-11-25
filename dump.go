@@ -20,9 +20,14 @@ import (
 //
 // When no entry exists under the prefix and the prefix is not the root,
 // Dump fails with the not-found error rendered as 'Key not found:
-// /<prefix>'; the root with nothing stored returns an empty map.
+// /<prefix>'; the root with nothing stored returns an empty map. Without
+// configured etcd, Dump returns an empty map without consulting the cache or
+// resolving inheritance.
 func (c *Config) Dump(opts ...CallOption) (map[string]any, error) {
 	o := dumpDefaults(opts)
+	if c.client == nil {
+		return map[string]any{}, nil
+	}
 
 	out := map[string]any{}
 	if o.allowInherited && c.inherit {

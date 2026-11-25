@@ -34,7 +34,8 @@ content: |
 spec: toxin.New
 INPUT:
   - MUST: 'accept an options value supplying any subset of the configuration options, with defaults for the rest'
-  - MUST: 'default the prefix to "config/", the member list to 127.0.0.1:2379, caching on, case sensitivity off, inheritance on with inherit key "config.inherit" and inherit depth two, watching off, and clearing off'
+  - MUST: 'default the prefix to "config/", caching on, case sensitivity off, inheritance on with inherit key "config.inherit" and inherit depth two, watching off, and clearing off'
+  - MUST: 'default to an absent etcd member list'
   - MUST: 'default the log level to critical'
   - MUST: 'trim whitespace and slashes from the prefix and give it exactly one trailing slash'
   - MUST: 'lowercase the prefix unless case sensitivity is enabled'
@@ -44,7 +45,7 @@ INPUT:
     USES: root@EnvNaming
   - MUST: 'consult `TOXIN_PREFIX`, `TOXIN_WATCH` and `TOXIN_INHERIT_DEPTH` only when the corresponding option is not supplied'
     USES: root@EnvNaming
-  - WHEN: 'watching is enabled'
+  - WHEN: 'watching is enabled and etcd is configured'
     MUST: 'start the watcher at construction'
     SEE: Config.Watch
   - WHEN: 'a file cache is configured'
@@ -52,7 +53,10 @@ INPUT:
     SEE: toxin.FileCache
   - CONFORMS: 10-etcd3@etcd.Client
 RETURN:
-  - MUST: 'return a Config bound to the namespace prefix and the cluster'
+  - WHEN: 'etcd is configured'
+    MUST: 'return a Config bound to the namespace prefix and the cluster'
+  - WHEN: 'etcd is not configured'
+    MUST: 'return a Config bound to the namespace prefix with no cluster and an empty resolved member list'
 ERROR:
   - WHEN: 'the log level is not one of silly, debug, info, warn or critical'
     MUST: 'reject with the error "Unknown log level ''<level>''"'
@@ -63,6 +67,13 @@ ERROR:
     USES: root@EnvNaming
   - WHEN: 'a file cache is configured and the cache directory cannot be created or a file in it cannot be opened'
     MUST: 'reject with the error "Could not open toxin cache: <cause>"'
+---
+spec: Config.Endpoints
+RETURN:
+  - WHEN: 'etcd is configured'
+    MUST: 'return the resolved etcd member list'
+  - WHEN: 'etcd is not configured'
+    MUST: 'return an empty list'
 ---
 spec: Config.Get
 INPUT:
@@ -83,14 +94,19 @@ RETURN:
   - WHEN: 'etcd does not hold the key, inheritance is allowed, and the call is not cacheOnly'
     MUST: 'consult the inherited chain before falling back'
     USES: Inheritance
+  - WHEN: 'etcd is not configured and the key is not in the cache'
+    MUST: 'treat the key as unset without contacting etcd or logging a warning'
+  - WHEN: 'etcd is not configured, inheritance is allowed, and the call is not cacheOnly'
+    MUST: 'consult the inherited chain before falling back'
+    USES: Inheritance
   - WHEN: 'the key is unset, a default is given, and the call is not cacheOnly'
     MUST: 'return the default and store it in the cache unless cacheResult is false'
   - WHEN: 'the strict variant finds the key unset'
     MUST: 'return the error ''No setting "<key>"'''
 ERROR:
-  - WHEN: 'the etcd read fails with anything other than not-found'
+  - WHEN: 'etcd is configured and the etcd read fails with anything other than not-found'
     MUST: 'return that error to the caller'
-  - WHEN: 'the etcd response carries no entry'
+  - WHEN: 'etcd is configured and the etcd response carries no entry'
     MUST: 'treat the key as unset and log a warning'
 INVARIANT:
   - MUST: 'treat an absent key as a value outcome answered by the default, never as an error outside the strict variant'
@@ -98,32 +114,46 @@ INVARIANT:
 spec: Config.Set
 INPUT:
   - MUST: 'take a setting key, a value of any JSON-encodable type, and per-call options ttl and cacheOnly'
-  - MUST: 'store a string value verbatim and JSON-encode any other value'
+  - WHEN: 'etcd is configured'
+    MUST: 'store a string value verbatim and JSON-encode any other value'
     USES: 10-etcd3@ValueEncoding
-  - MUST: 'lowercase the key and write it under the prefix unless case sensitivity is enabled'
+  - MUST: 'lowercase the key unless case sensitivity is enabled'
+  - WHEN: 'etcd is configured'
+    MUST: 'write the coerced key under the prefix'
     USES: 10-etcd3@EtcdKeys
   - SEE: 10-etcd3@etcd.Put
 RETURN:
-  - MUST: 'report an etcd write failure to the caller'
+  - WHEN: 'etcd is configured'
+    MUST: 'report an etcd write failure to the caller'
 SIDE-EFFECT:
-  - WHEN: 'cacheOnly is set'
+  - WHEN: 'cacheOnly is set or etcd is not configured'
     MUST: 'write the cache only, and nothing at all when caching is disabled'
-  - WHEN: 'cacheOnly is unset'
+  - WHEN: 'etcd is not configured'
+    MUST: 'ignore the ttl option'
+  - WHEN: 'cacheOnly is unset and etcd is configured'
     MUST: 'write etcd first and update the cache only after the write succeeds'
 ---
 spec: Config.Dump
 INPUT:
-  - MUST: 'read the whole subtree under the prefix as the etcd read produces it'
+  - WHEN: 'etcd is configured'
+    MUST: 'read the whole subtree under the prefix as the etcd read produces it'
     CONFORMS: 10-etcd3@etcd.Read::RETURN
-  - MUST: 'trust the read''s ordering and boundary guarantees without re-validating them'
+  - WHEN: 'etcd is configured'
+    MUST: 'trust the read''s ordering and boundary guarantees without re-validating them'
 RETURN:
-  - MUST: 'return a map from prefix-stripped, case-coerced key to decoded value'
+  - WHEN: 'etcd is configured'
+    MUST: 'return a map from prefix-stripped, case-coerced key to decoded value'
     USES: 10-etcd3@ValueEncoding
-  - WHEN: 'inheritance is allowed'
+  - WHEN: 'etcd is configured and inheritance is allowed'
     MUST: 'overlay the parent dump first so own keys win'
     USES: Inheritance
+  - WHEN: 'etcd is not configured'
+    MUST: 'return an empty map'
+SIDE-EFFECT:
+  - WHEN: 'etcd is not configured'
+    MUST-NOT: 'consult the cache or resolve inheritance'
 ERROR:
-  - WHEN: 'no entry exists under the prefix and the prefix is not the root'
+  - WHEN: 'etcd is configured and no entry exists under the prefix and the prefix is not the root'
     MUST: 'return the not-found error rendered as ''Key not found: <addressed key>'', the prefix in slash form with its trailing slash trimmed'
     CONFORMS: 10-etcd3@etcd.Error
 ---
@@ -139,13 +169,16 @@ INPUT:
     SEE: toxin.FileCache
   - WHEN: 'fileCacheOnly is set'
     MUST: 'never contact etcd'
-  - WHEN: 'no config is given, no cache file was read, and fileCacheOnly is unset'
+  - WHEN: 'no config is given, no cache file was read, fileCacheOnly is unset, and etcd is configured'
     MUST: 'load the etcd configuration under the prefix'
+    SEE: Config.Dump
+  - WHEN: 'no config is given, no cache file was read, fileCacheOnly is unset, and etcd is not configured'
+    MUST: 'load an empty source map'
     SEE: Config.Dump
 RETURN:
   - MUST: 'return the resulting cache map'
-  - WHEN: 'no config was given and the namespace holds nothing'
-    MUST: 'yield an empty cache without error'
+  - WHEN: 'the loaded source holds no keys'
+    MUST: 'contribute no keys without error'
 SIDE-EFFECT:
   - WHEN: 'a cache file was read'
     MUST: 'populate the cache from the file cache without contacting etcd, clearing the cache, or saving the cache file'
@@ -154,7 +187,7 @@ SIDE-EFFECT:
     MUST: 'clear the cache before loading'
   - WHEN: 'no cache file was read and fileCacheOnly is unset'
     MUST: 'merge the loaded keys into the cache'
-  - WHEN: 'no cache file was read, fileCacheOnly is unset, and cacheOnly is false'
+  - WHEN: 'no cache file was read, fileCacheOnly is unset, cacheOnly is false, and etcd is configured'
     MUST: 'write every loaded key to etcd, merged over what exists rather than replacing it'
   - WHEN: 'no cache file was read, fileCacheOnly is unset, and a file cache is configured'
     MUST: 'save the cache file after loading'
@@ -165,13 +198,16 @@ spec: Config.List
 INPUT:
   - MUST: 'take an optional key below the prefix and an option dirOnly defaulting to true'
 RETURN:
-  - MUST: 'return the immediate children of the prefix and key, relative to the combined prefix-and-key address'
+  - WHEN: 'etcd is configured'
+    MUST: 'return the immediate children of the prefix and key, relative to the combined prefix-and-key address'
   - WHEN: 'dirOnly is set'
     MUST: 'return only children that are directories, without a trailing slash'
   - WHEN: 'dirOnly is unset'
     MUST: 'return leaf keys as-is and directory keys with a trailing slash'
   - WHEN: 'nothing exists under the namespace'
     MUST: 'return an empty list'
+  - WHEN: 'etcd is not configured'
+    MUST: 'return an empty list without consulting the cache'
   - SEE: 10-etcd3@etcd.Read
 ---
 spec: Config.Clear
@@ -181,19 +217,23 @@ ERROR:
   - WHEN: 'the allowClear option is off'
     MUST: 'return the error "clear() is not allowed on this instance"'
 SIDE-EFFECT:
-  - WHEN: 'cacheOnly is unset'
+  - WHEN: 'cacheOnly is unset and etcd is configured'
     MUST: 'recursively delete the prefix namespace'
     SEE: 10-etcd3@etcd.Delete
-  - WHEN: 'the namespace is already empty'
+  - WHEN: 'etcd is configured and the namespace is already empty'
     MUST: 'succeed without error and leave the cache as it is'
   - WHEN: 'cacheOnly is set or the namespace delete removed entries'
     MUST: 'empty the cache'
+  - WHEN: 'cacheOnly is unset and etcd is not configured'
+    MUST: 'empty the cache without error'
 ---
 spec: Config.Watch
 INPUT:
   - SEE: 10-etcd3@etcd.Watch
 SIDE-EFFECT:
-  - WHEN: 'caching is disabled'
+  - WHEN: 'etcd is not configured'
+    MUST: 'skip watching without a warning'
+  - WHEN: 'etcd is configured and caching is disabled'
     MUST: 'skip watching with a warning'
   - MUST: 'run at most one watcher per config'
   - WHEN: 'a set event arrives'
@@ -222,6 +262,9 @@ SIDE-EFFECT:
     MUST: 'wipe the settings before loading'
   - MUST: 'load the configuration anew'
     SEE: Config.Load
+  - WHEN: 'etcd is not configured'
+    MUST: 'load the in-process and file-cache sources without error'
+    SEE: Config.Load
 ---
 spec: toxin.ReloadHook
 INPUT:
@@ -234,6 +277,8 @@ spec: toxin.Default
 RETURN:
   - MUST: 'return one process-wide Config shared by every caller in the process'
   - MUST: 'construct and load it on first use rather than at package initialization'
+  - WHEN: 'etcd is not configured'
+    MUST: 'succeed at the first-use construction and load over the in-process and file-cache sources'
   - MUST: 'expose package-level Get, Set, GetStrict and Clear that operate on the shared instance'
     SEE: Config.Get
   - MUST: 'expose package-level reload and reload hook registration that operate on the shared instance'

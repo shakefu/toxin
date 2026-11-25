@@ -106,6 +106,9 @@ func (c *Config) lookup(key string, o callConfig) (any, bool, error) {
 // cache and without inheritance. A response that carries no entry for the
 // key reports the key as unset, with a warning.
 func (c *Config) etcdGet(key string) (any, bool, error) {
+	if c.client == nil {
+		return nil, false, nil
+	}
 	addr := etcd.TrimKey(c.etcdKey(key))
 	entries, err := c.client.Read(context.Background(), addr, false)
 	if err != nil {
