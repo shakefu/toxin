@@ -50,10 +50,20 @@ func TestNoEtcdInheritedResultPreservesConcurrentChildSet(t *testing.T) {
 		t.Fatal("inherited Get did not start reading the parent file")
 	}
 
+	defer func() { _ = writer.Close() }()
+
 	// The reader is now blocked waiting for JSON. Complete the child write
-	// before allowing the inherited result to reach the child cache.
-	if err := child.Set("app.mode", "custom"); err != nil {
-		t.Fatalf("Set child value: %v", err)
+	// before allowing the inherited result to reach the child cache. Both the
+	// timeout and deferred close unblock the reader if Set regresses.
+	setDone := make(chan error, 1)
+	go func() { setDone <- child.Set("app.mode", "custom") }()
+	select {
+	case err := <-setDone:
+		if err != nil {
+			t.Fatalf("Set child value: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("child Set did not finish")
 	}
 	if _, err := writer.Write([]byte(`{"app.mode":"standard"}`)); err != nil {
 		t.Fatalf("writing parent JSON: %v", err)
