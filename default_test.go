@@ -3,6 +3,7 @@ package toxin
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/shakefu/toxin/internal/testutil"
@@ -160,6 +161,43 @@ func TestDefaultWithoutEtcdUsesInProcessShortcuts(t *testing.T) {
 	}
 	if hooks != 2 {
 		t.Errorf("package reload hooks ran %d times, want 2", hooks)
+	}
+}
+
+// 20-api@Inheritance: concurrent first lookups after Default safely race to
+// resolve the missing inherit key without exposing unsynchronized state.
+func TestDefaultWithoutEtcdConcurrentGetIsRaceSafe(t *testing.T) {
+	isolateDefault(t)
+	clearToxinEnv(t)
+	if _, err := Default(); err != nil {
+		t.Fatalf("Default without etcd: %v", err)
+	}
+
+	const workers = 8
+	const lookups = 25
+	var wg sync.WaitGroup
+	failures := make(chan string, workers)
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < lookups; j++ {
+				got, err := Get("app.missing", "fallback")
+				if err != nil {
+					failures <- err.Error()
+					return
+				}
+				if got != "fallback" {
+					failures <- "unexpected value returned by concurrent Get"
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	close(failures)
+	for failure := range failures {
+		t.Error(failure)
 	}
 }
 

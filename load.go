@@ -14,17 +14,18 @@ import (
 // value, a top-level key that already contains a dot is kept as-is, and a
 // nested empty map is stored as an empty map value. Without one, the
 // configuration comes from a configured file cache when its file exists,
-// and otherwise from etcd under the prefix.
+// otherwise from etcd under the prefix, or from an empty external source
+// when etcd is not configured.
 //
 // The per-call options default to cacheOnly true, merge true,
 // allowInherited true and fileCacheOnly false. A cache file that was read
 // populates the cache without contacting etcd, clearing the cache or
 // saving the cache file. Otherwise, with fileCacheOnly unset, a merge of
 // false clears the cache before loading, the loaded keys are merged into
-// the cache, cacheOnly false writes every loaded key to etcd — merged over
-// what exists rather than replacing it — and a configured file cache is
-// saved after loading. FileCacheOnly never contacts etcd. The registered
-// reload hooks run after the load.
+// the cache, cacheOnly false writes every loaded key to configured etcd —
+// merged over what exists rather than replacing it — and a configured file
+// cache is saved after loading. FileCacheOnly never contacts etcd. The
+// registered reload hooks run after the load.
 func (c *Config) Load(opts ...CallOption) (map[string]any, error) {
 	o := loadDefaults(opts)
 
@@ -75,7 +76,7 @@ func (c *Config) Load(opts ...CallOption) (map[string]any, error) {
 	}
 	c.mergeIntoCache(flat)
 
-	if !o.cacheOnly {
+	if !o.cacheOnly && c.client != nil {
 		for k, v := range flat {
 			if err := c.Set(k, v); err != nil {
 				return nil, err

@@ -50,8 +50,10 @@ func WithPrefix(prefix string) Option {
 	return func(o *options) { o.prefix, o.prefixSet = prefix, true }
 }
 
-// WithHosts sets the etcd member list: a single comma-separated string, one
-// member per argument, or a mix. TOXIN_ETCD, when set, overrides it.
+// WithHosts sets the etcd member list and enables etcd when at least one
+// usable member remains: a single comma-separated string, one member per
+// argument, or a mix. TOXIN_ETCD, when non-empty, overrides it. With no
+// effective members, the Config uses in-process sources instead.
 func WithHosts(hosts ...string) Option {
 	return func(o *options) { o.hosts = hosts }
 }
@@ -97,13 +99,14 @@ func WithInheritDepth(depth int) Option {
 // WithWatch enables watching the namespace so etcd changes keep the cache
 // up to date (the default is off). TOXIN_WATCH applies only when this
 // option is not supplied. Watching is skipped with a warning when caching
-// is disabled.
+// is disabled and silently when etcd is not configured.
 func WithWatch(on bool) Option {
 	return func(o *options) { o.watch, o.watchSet = on, true }
 }
 
-// WithAllowClear permits Clear to delete the namespace from etcd; without
-// it (the default) Clear refuses.
+// WithAllowClear permits Clear to delete the namespace from etcd, or to
+// empty the in-process settings when etcd is not configured; without it
+// (the default) Clear refuses.
 func WithAllowClear(on bool) Option {
 	return func(o *options) { o.allowClear = on }
 }
@@ -146,8 +149,12 @@ type Config struct {
 	cache map[string]any
 	hooks []func()
 
-	// resolveMu serializes the lazy resolution of parent.
+	// resolveMu serializes inheritance state and lazy resolution of parent.
 	resolveMu sync.Mutex
+
+	// localSourceOnce loads a no-etcd parent's file cache at most once.
+	localSourceOnce sync.Once
+	localSourceErr  error
 
 	watchOnce sync.Once
 	watcher   *etcd.Watcher
@@ -330,7 +337,8 @@ func (c *Config) stripKey(key string) (string, bool) {
 
 // makeParent builds the parent configuration for an inherit prefix: the
 // same cluster, cache, case sensitivity and inherit key, one unit of
-// inherit depth consumed, inheriting further only with depth remaining.
+// inherit depth consumed, inheriting further only with depth remaining. A
+// no-etcd parent also reads the same file-cache directory under its prefix.
 func (c *Config) makeParent(prefix string) *Config {
 	depth := c.inheritDepth - 1
 	p := &Config{
@@ -344,8 +352,31 @@ func (c *Config) makeParent(prefix string) *Config {
 		log:           c.log,
 		cache:         map[string]any{},
 	}
+	if c.fileCache != nil {
+		p.fileCache = NewFileCache(p.prefix, c.fileCache.dir)
+	}
 	p.inherit = depth > 0
 	return p
+}
+
+// inheritanceEnabled reports whether inheritance may be consulted. It uses
+// the same lock as lazy parent resolution so a miss that disables inheritance
+// cannot race another lookup or dump.
+func (c *Config) inheritanceEnabled() bool {
+	c.resolveMu.Lock()
+	defer c.resolveMu.Unlock()
+	return c.inherit
+}
+
+// loadLocalSource reads a no-etcd parent's file cache once. A missing file
+// contributes no values; a read failure is returned without logging.
+func (c *Config) loadLocalSource() error {
+	c.localSourceOnce.Do(func() {
+		if c.fileCache != nil {
+			_, c.localSourceErr = c.readFileCache()
+		}
+	})
+	return c.localSourceErr
 }
 
 // parentConfig returns the parent configuration, resolving it from the
@@ -355,9 +386,6 @@ func (c *Config) makeParent(prefix string) *Config {
 // unreadable inherit value disables inheritance for the rest of the
 // config's life.
 func (c *Config) parentConfig() *Config {
-	if !c.inherit {
-		return nil
-	}
 	c.resolveMu.Lock()
 	defer c.resolveMu.Unlock()
 	if c.parent != nil || !c.inherit {
@@ -399,6 +427,16 @@ func (c *Config) storeCached(key string, value any) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.cache[key] = value
+}
+
+// storeCachedIfAbsent stores a fallback without replacing a local setting
+// written by Set or loaded from another source.
+func (c *Config) storeCachedIfAbsent(key string, value any) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if _, exists := c.cache[key]; !exists {
+		c.cache[key] = value
+	}
 }
 
 // dropCached drops one cached setting.

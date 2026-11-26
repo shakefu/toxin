@@ -19,17 +19,26 @@ content: |
     TOXIN_ETCD           Comma-separated etcd member list; each entry is
                          host[:port], optionally prefixed scheme:// and
                          user:password@. Overrides programmatic hosts.
+                         No library client by default; CLI etcd operations
+                         default to 127.0.0.1:2379. Blank entries are
+                         dropped, and a non-empty value with no remaining
+                         entries disables the library client and is an
+                         error for CLI etcd operations.
                          (from PYCONFIG_ETCD_HOSTS, JETCONFIG_ETCD)
     TOXIN_PREFIX         Namespace prefix for keys; default "config/".
                          (from PYCONFIG_ETCD_PREFIX)
     TOXIN_SSL_CA         Comma-separated CA certificate file paths; each
                          file may hold concatenated PEM certificates.
+                         Used only with an effective etcd member list.
                          (from JETCONFIG_SSL_CA, PYCONFIG_ETCD_CACERT)
     TOXIN_SSL_CERT       Client certificate file path.
+                         Used only with an effective etcd member list.
                          (from JETCONFIG_SSL_CERT, PYCONFIG_ETCD_CERT)
     TOXIN_SSL_KEY        Client key file path.
+                         Used only with an effective etcd member list.
                          (from JETCONFIG_SSL_KEY, PYCONFIG_ETCD_KEY)
     TOXIN_AUTH           Basic auth credentials "username:password".
+                         Used only with an effective etcd member list.
                          (from PYCONFIG_ETCD_AUTH)
     TOXIN_LOGLEVEL       One of silly, debug, info, warn, critical;
                          default critical. (from JETCONFIG_LOGLEVEL)
@@ -60,8 +69,11 @@ INPUT:
   - MUST: 'address settings by dot-notation keys resolved under a namespace prefix'
     USES: 10-etcd3@EtcdKeys
 RETURN:
-  - MUST: 'yield values decoded from JSON storage, falling back to the raw stored string when it is not valid JSON'
+  - WHEN: 'etcd is configured'
+    MUST: 'yield values decoded from JSON storage, falling back to the raw stored string when it is not valid JSON'
     USES: 10-etcd3@ValueEncoding
+  - WHEN: 'etcd is not configured'
+    MUST: 'preserve the original typed values of in-process settings'
   - MUST: 'return a caller-supplied default when a key is unset'
 ERROR:
   - WHEN: 'etcd is configured and an etcd operation fails'

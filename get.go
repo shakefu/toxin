@@ -17,7 +17,8 @@ var ErrNoSetting = errors.New("No setting")
 // error, because an absent key is a value outcome. Per-call options tune
 // the cache consultation (cached), whether the result is cached
 // (cacheResult), whether etcd is contacted at all (cacheOnly) and whether
-// inheritance is consulted (allowInherited).
+// inheritance is consulted (allowInherited). Without etcd, a fallback is
+// inserted only when no local setting already exists.
 func (c *Config) Get(key string, def any, opts ...CallOption) (any, error) {
 	o := getDefaults(opts)
 	k := c.coerceKey(key)
@@ -30,9 +31,14 @@ func (c *Config) Get(key string, def any, opts ...CallOption) (any, error) {
 	}
 	// A cacheOnly miss returns the default without touching anything
 	// else, as jetconfig did; otherwise the default is stored for later
-	// calls unless cacheResult is false.
+	// calls unless cacheResult is false. A local fallback never replaces
+	// an existing in-process setting.
 	if def != nil && c.cacheOn && o.cacheResult && !o.cacheOnly {
-		c.storeCached(k, def)
+		if c.client == nil {
+			c.storeCachedIfAbsent(k, def)
+		} else {
+			c.storeCached(k, def)
+		}
 	}
 	return def, nil
 }
@@ -80,15 +86,22 @@ func (c *Config) lookup(key string, o callConfig) (any, bool, error) {
 		return v, true, nil
 	}
 
-	if o.allowInherited && c.inherit {
+	if o.allowInherited && c.inheritanceEnabled() {
 		if p := c.parentConfig(); p != nil {
+			if c.client == nil {
+				if err := p.loadLocalSource(); err != nil {
+					return nil, false, err
+				}
+			}
 			// The parent consults its own cache and its own inheritance;
 			// cacheOnly never reaches the parent.
 			po := callConfig{cached: o.cached, cacheResult: o.cacheResult, allowInherited: true}
 			pv, pFound, pErr := p.lookup(key, po)
 			switch {
+			case pErr != nil && c.client == nil:
+				return nil, false, pErr
 			case pErr != nil:
-				// An inherited lookup that fails falls back to the
+				// An inherited etcd lookup that fails falls back to the
 				// default, as jetconfig did.
 				c.log.Warnf("Error getting inherited key: %v", pErr)
 			case pFound:

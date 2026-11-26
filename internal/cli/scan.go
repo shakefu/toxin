@@ -184,12 +184,18 @@ func parseDir(dir string) []call {
 	return calls
 }
 
-// loadLive loads the process-wide default configuration and marks every
-// scanned call with its key's current value — a falsy one falls back to
-// the call's rendering — then appends the keys that exist only in the
-// configuration, with no source annotation of their own.
+// newLiveConfig constructs the scanner's own CLI-backed Config rather than
+// the library's process-wide in-process default.
+func newLiveConfig() (*toxin.Config, error) {
+	return newEtcdConfig()
+}
+
+// loadLive loads the CLI-configured etcd namespace and marks every scanned
+// call with its key's current value — a falsy one falls back to the call's
+// rendering — then appends the keys that exist only in the configuration,
+// with no source annotation of their own.
 func loadLive(calls []call) ([]call, error) {
-	conf, err := toxin.Default()
+	conf, err := newLiveConfig()
 	if err != nil {
 		return nil, fail("%v", err)
 	}

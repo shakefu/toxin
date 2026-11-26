@@ -1,9 +1,11 @@
 package toxin
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -28,7 +30,7 @@ func NewFileCache(prefix, dir string) *FileCache {
 // Filename returns the cache file path: the prefix with leading and
 // trailing slashes trimmed, ".." collapsed to "-", and a ".json"
 // extension, keeping interior prefix slashes as directory separators
-// nested under the cache directory.
+// nested under the configured cache directory.
 func (fc *FileCache) Filename() string {
 	name := strings.Trim(fc.prefix, "/")
 	name = strings.ReplaceAll(name, "..", "-")
@@ -57,9 +59,10 @@ func (fc *FileCache) Save(cache map[string]any) error {
 // Load reads the cache file and fills dst with its entries, only for
 // keys not already present, so freshly loaded values win. It reports
 // whether cached data was read; when no cache file exists it reports no
-// cached data without error and leaves dst untouched. A cache file that
-// exists but cannot be read fails with the error
-// "Could not read toxin cache: <cause>".
+// cached data without error and leaves dst untouched. JSON numbers decode
+// as json.Number without a float64 conversion. A cache file that exists but
+// cannot be read, including one with trailing JSON data, fails with the
+// error "Could not read toxin cache: <cause>".
 func (fc *FileCache) Load(dst map[string]any) (bool, error) {
 	data, err := os.ReadFile(fc.Filename())
 	if err != nil {
@@ -69,7 +72,16 @@ func (fc *FileCache) Load(dst map[string]any) (bool, error) {
 		return false, fmt.Errorf("Could not read toxin cache: %w", err)
 	}
 	var cached map[string]any
-	if err := json.Unmarshal(data, &cached); err != nil {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
+	if err := dec.Decode(&cached); err != nil {
+		return false, fmt.Errorf("Could not read toxin cache: %w", err)
+	}
+	var trailing any
+	if err := dec.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			err = errors.New("multiple JSON values")
+		}
 		return false, fmt.Errorf("Could not read toxin cache: %w", err)
 	}
 	if dst == nil {

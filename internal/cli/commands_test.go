@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -70,18 +71,54 @@ func TestNewConfigEnvironmentOverridesDefaultHost(t *testing.T) {
 }
 
 // cli.Main ERROR: a non-empty TOXIN_ETCD that yields no effective endpoints
-// returns the exact configuration error rather than silently using loopback.
+// returns the exact configuration error before creating a cache directory.
 func TestNewConfigRejectsNoEffectiveHost(t *testing.T) {
 	for _, value := range []string{" \t ", " , , "} {
 		t.Run(value, func(t *testing.T) {
 			clearNewConfigEnv(t)
 			t.Setenv("TOXIN_ETCD", value)
+			cacheDir := filepath.Join(t.TempDir(), "cache")
+			t.Setenv("TOXIN_CACHE", cacheDir)
 
 			_, err := newConfig("config/", false)
 			if err == nil || err.Error() != "etcd is not configured" {
 				t.Errorf("newConfig error = %v, want %q", err, "etcd is not configured")
 			}
+			if _, statErr := os.Stat(cacheDir); !os.IsNotExist(statErr) {
+				t.Errorf("empty-endpoint rejection created cache directory %q", cacheDir)
+			}
 		})
+	}
+}
+
+// cli.Main ERROR: the complete command path prints the exact endpoint error
+// to stderr, emits no stdout, and exits one.
+func TestMainNoEffectiveHostPrintsErrorAndExitsOne(t *testing.T) {
+	clearNewConfigEnv(t)
+	t.Setenv("TOXIN_ETCD", " , , ")
+	out, errOut, code := runCLI("get", "config/", "k")
+	if code != 1 {
+		t.Errorf("exit code = %d, want 1", code)
+	}
+	if out != "" {
+		t.Errorf("stdout = %q, want empty", out)
+	}
+	if errOut != "etcd is not configured\n" {
+		t.Errorf("stderr = %q, want %q", errOut, "etcd is not configured\n")
+	}
+}
+
+// cli.Scan: live configuration has the CLI loopback default rather than the
+// library Default's no-etcd behavior.
+func TestNewLiveConfigDefaultsToLoopback(t *testing.T) {
+	clearNewConfigEnv(t)
+	conf, err := newLiveConfig()
+	if err != nil {
+		t.Fatalf("newLiveConfig: %v", err)
+	}
+	got := conf.Endpoints()
+	if len(got) != 1 || got[0] != "http://127.0.0.1:2379" {
+		t.Errorf("endpoints = %v, want [http://127.0.0.1:2379]", got)
 	}
 }
 

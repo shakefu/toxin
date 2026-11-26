@@ -160,21 +160,25 @@ func TestFileCacheLoadFailsWithCouldNotReadToxinCache(t *testing.T) {
 	}
 }
 
-// 20-api@toxin.FileCache::ERROR: a cache file whose contents cannot be
-// read as the cache's JSON is also a read failure.
+// 20-api@toxin.FileCache::ERROR: invalid JSON and trailing data after a
+// valid cache value are both read failures.
 func TestFileCacheLoadFailsWithCouldNotReadToxinCacheOnInvalidJSON(t *testing.T) {
-	dir := t.TempDir()
-	fc := NewFileCache("config/", dir)
-	if err := os.WriteFile(fc.Filename(), []byte("not json"), 0o644); err != nil {
-		t.Fatalf("writing bad cache file: %v", err)
-	}
+	for _, contents := range []string{"not json", `{"key": 1} {"trailing": 2}`} {
+		t.Run(contents, func(t *testing.T) {
+			dir := t.TempDir()
+			fc := NewFileCache("config/", dir)
+			if err := os.WriteFile(fc.Filename(), []byte(contents), 0o644); err != nil {
+				t.Fatalf("writing bad cache file: %v", err)
+			}
 
-	_, err := fc.Load(map[string]any{})
-	if err == nil {
-		t.Fatal("Load succeeded against a non-JSON cache file, want error")
-	}
-	if !strings.HasPrefix(err.Error(), "Could not read toxin cache: ") {
-		t.Errorf("error = %q, want prefix %q", err.Error(), "Could not read toxin cache: ")
+			_, err := fc.Load(map[string]any{})
+			if err == nil {
+				t.Fatal("Load succeeded against an invalid cache file, want error")
+			}
+			if !strings.HasPrefix(err.Error(), "Could not read toxin cache: ") {
+				t.Errorf("error = %q, want prefix %q", err.Error(), "Could not read toxin cache: ")
+			}
+		})
 	}
 }
 
