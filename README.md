@@ -47,6 +47,9 @@ With etcd configured, values are JSON-typed: a string crosses verbatim,
 anything else as its JSON encoding; a read decodes JSON, so the number above
 comes back as a `json.Number` and a plain non-JSON string as itself.
 Without etcd, `Set` stores the original typed value in the in-process cache.
+Inherited parents load their saved settings once from the same file-cache
+directory under the parent's normalized prefix; a missing parent file is
+empty.
 
 One process-wide `Config` is shared by every caller, constructed on first
 use, with package-level shortcuts that operate on it:
@@ -81,10 +84,11 @@ toxin clear config/                # clear the namespace; a second operand is
 toxin load config/ settings.json   # load a JSON file into the namespace
 ```
 
-Management commands default to `127.0.0.1:2379` when `TOXIN_ETCD` is unset
-or empty, independently of the library's optional-etcd default. A non-empty
-`TOXIN_ETCD` overrides that default; one containing no usable members fails
-with `etcd is not configured` rather than running in local-only mode.
+Management commands and scanner `--load-configs` default to
+`127.0.0.1:2379` when `TOXIN_ETCD` is unset or empty, independently of the
+library's optional-etcd default. A non-empty `TOXIN_ETCD` overrides that
+default; one containing no usable members fails with
+`etcd is not configured` rather than running in local-only mode.
 
 Global options in command mode: `-n/--no-inherit` disables inheritance,
 `-v/--verbose` (repeatable) steps the log level from critical toward

@@ -30,6 +30,13 @@ content: |
      keys in any ancestor.
   6. A parent namespace that holds nothing is not an error; the child
      simply has no parent values.
+  7. Without etcd, a resolved parent uses the child's file-cache directory
+     under the parent's normalized prefix and reads that file once before
+     its first lookup. A missing parent file is empty.
+  8. A parent file-cache read failure is returned to the caller without a
+     log message.
+  9. Access to the inheritance-enabled flag and lazy parent resolution is
+     serialized across concurrent lookups and dumps.
 ---
 spec: toxin.New
 INPUT:
@@ -51,7 +58,8 @@ INPUT:
   - WHEN: 'a file cache is configured'
     MUST: 'create the cache directory and open a file in it at construction'
     SEE: toxin.FileCache
-  - CONFORMS: 10-etcd3@etcd.Client
+  - CONFORMS: 10-etcd3@etcd.Client::INPUT
+  - CONFORMS: 10-etcd3@etcd.Client::ERROR
 RETURN:
   - WHEN: 'etcd is configured'
     MUST: 'return a Config bound to the namespace prefix and the cluster'
@@ -96,11 +104,15 @@ RETURN:
     USES: Inheritance
   - WHEN: 'etcd is not configured and the key is not in the cache'
     MUST: 'treat the key as unset without contacting etcd or logging a warning'
+  - WHEN: 'etcd is not configured and cached is unset'
+    MUST: 'bypass the in-process setting and resolve through inheritance or the default'
   - WHEN: 'etcd is not configured, inheritance is allowed, and the call is not cacheOnly'
     MUST: 'consult the inherited chain before falling back'
     USES: Inheritance
-  - WHEN: 'the key is unset, a default is given, and the call is not cacheOnly'
+  - WHEN: 'etcd is configured, the key is unset, a default is given, and the call is not cacheOnly'
     MUST: 'return the default and store it in the cache unless cacheResult is false'
+  - WHEN: 'etcd is not configured, the key is unset, a default is given, and the call is not cacheOnly'
+    MUST: 'return the default and insert it only if the local setting is absent unless cacheResult is false'
   - WHEN: 'the strict variant finds the key unset'
     MUST: 'return the error ''No setting "<key>"'''
 ERROR:
@@ -108,6 +120,9 @@ ERROR:
     MUST: 'return that error to the caller'
   - WHEN: 'etcd is configured and the etcd response carries no entry'
     MUST: 'treat the key as unset and log a warning'
+  - WHEN: 'etcd is not configured and a parent file cache cannot be read'
+    MUST: 'return the file-cache error without logging'
+    USES: Inheritance
 INVARIANT:
   - MUST: 'treat an absent key as a value outcome answered by the default, never as an error outside the strict variant'
 ---
@@ -132,6 +147,9 @@ SIDE-EFFECT:
     MUST: 'ignore the ttl option'
   - WHEN: 'cacheOnly is unset and etcd is configured'
     MUST: 'write etcd first and update the cache only after the write succeeds'
+ERROR:
+  - WHEN: 'the value cannot be JSON-encoded'
+    MUST: 'return the encoding error without writing a value'
 ---
 spec: Config.Dump
 INPUT:
@@ -263,7 +281,7 @@ SIDE-EFFECT:
   - MUST: 'load the configuration anew'
     SEE: Config.Load
   - WHEN: 'etcd is not configured'
-    MUST: 'load the in-process and file-cache sources without error'
+    MUST: 'load the in-process and available file-cache sources'
     SEE: Config.Load
 ---
 spec: toxin.ReloadHook
@@ -277,8 +295,8 @@ spec: toxin.Default
 RETURN:
   - MUST: 'return one process-wide Config shared by every caller in the process'
   - MUST: 'construct and load it on first use rather than at package initialization'
-  - WHEN: 'etcd is not configured'
-    MUST: 'succeed at the first-use construction and load over the in-process and file-cache sources'
+  - WHEN: 'etcd is not configured and no file cache is configured'
+    MUST: 'succeed at the first-use construction and load over the in-process sources'
   - MUST: 'expose package-level Get, Set, GetStrict and Clear that operate on the shared instance'
     SEE: Config.Get
   - MUST: 'expose package-level reload and reload hook registration that operate on the shared instance'
@@ -293,10 +311,13 @@ SIDE-EFFECT:
   - MUST: 'create the nested prefix directories when saving'
   - MUST: 'write the cache map as JSON on save'
   - MUST: 'fill cache entries only for keys not already present, so freshly loaded values win'
+  - MUST: 'decode JSON numbers as json.Number without converting them to float64'
 ERROR:
   - WHEN: 'the cache file cannot be written on save'
     MUST: 'fail with the error "Could not write toxin cache: <cause>"'
   - WHEN: 'the cache file exists but cannot be read'
+    MUST: 'fail with the error "Could not read toxin cache: <cause>"'
+  - WHEN: 'the cache file contains trailing data after its JSON value'
     MUST: 'fail with the error "Could not read toxin cache: <cause>"'
   - WHEN: 'no cache file exists'
     MUST: 'report no cached data without error'

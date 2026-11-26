@@ -30,7 +30,7 @@ func (c *Config) Dump(opts ...CallOption) (map[string]any, error) {
 	}
 
 	out := map[string]any{}
-	if o.allowInherited && c.inherit {
+	if o.allowInherited && c.inheritanceEnabled() {
 		if p := c.parentConfig(); p != nil {
 			pm, err := p.Dump()
 			if err != nil {

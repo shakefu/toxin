@@ -12,11 +12,17 @@ import (
 // sensitivity is enabled. With cacheOnly or no configured etcd, the cache
 // alone is written — and nothing at all when caching is disabled. Otherwise
 // etcd is written first and the cache updated only after the write succeeds.
-// WithTTL grants an etcd key a lease that expires it that many seconds after
-// the write; it has no effect without etcd.
+// Every path validates JSON encodability first. WithTTL grants an etcd key a
+// lease that expires it that many seconds after the write; it has no effect
+// without etcd.
 func (c *Config) Set(key string, value any, opts ...CallOption) error {
 	o := setDefaults(opts)
 	k := c.coerceKey(key)
+
+	encoded, err := etcd.EncodeValue(value)
+	if err != nil {
+		return err
+	}
 
 	if o.cacheOnly || c.client == nil {
 		if c.cacheOn {
@@ -25,10 +31,6 @@ func (c *Config) Set(key string, value any, opts ...CallOption) error {
 		return nil
 	}
 
-	encoded, err := etcd.EncodeValue(value)
-	if err != nil {
-		return err
-	}
 	if _, err := c.client.Put(context.Background(), c.etcdKey(k), encoded, o.ttl); err != nil {
 		return err
 	}

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io/fs"
 	"os"
+	"strings"
 
 	"github.com/shakefu/toxin"
 )
@@ -71,25 +72,46 @@ func commandByName(name string) (commandSpec, bool) {
 
 const defaultEtcdHost = "127.0.0.1:2379"
 
-// newConfig constructs a Config on prefix under the resolved global
-// options: inheritance off with -n, the log level stepped down per -v
-// repeat. clear additionally enables clearing. Management commands retain
-// their loopback default independently of the library's host defaults.
-func newConfig(prefix string, allowClear bool) (*toxin.Config, error) {
-	conf, err := toxin.New(
-		toxin.WithPrefix(prefix),
-		toxin.WithInherit(!runGlobals.noInherit),
-		toxin.WithLogLevel(runGlobals.level()),
-		toxin.WithAllowClear(allowClear),
-		toxin.WithHosts(defaultEtcdHost),
-	)
+var errEtcdNotConfigured = errors.New("etcd is not configured")
+
+// newEtcdConfig constructs a CLI-backed Config with the command's loopback
+// default. A non-empty TOXIN_ETCD with no usable members is rejected before
+// toxin.New can create a configured file-cache directory.
+func newEtcdConfig(opts ...toxin.Option) (*toxin.Config, error) {
+	if env := os.Getenv("TOXIN_ETCD"); env != "" {
+		hasMember := false
+		for _, member := range strings.Split(env, ",") {
+			if strings.TrimSpace(member) != "" {
+				hasMember = true
+				break
+			}
+		}
+		if !hasMember {
+			return nil, errEtcdNotConfigured
+		}
+	}
+
+	opts = append(opts, toxin.WithHosts(defaultEtcdHost))
+	conf, err := toxin.New(opts...)
 	if err != nil {
 		return nil, err
 	}
 	if len(conf.Endpoints()) == 0 {
-		return nil, errors.New("etcd is not configured")
+		return nil, errEtcdNotConfigured
 	}
 	return conf, nil
+}
+
+// newConfig constructs a Config on prefix under the resolved global
+// options: inheritance off with -n, the log level stepped down per -v
+// repeat. clear additionally enables clearing.
+func newConfig(prefix string, allowClear bool) (*toxin.Config, error) {
+	return newEtcdConfig(
+		toxin.WithPrefix(prefix),
+		toxin.WithInherit(!runGlobals.noInherit),
+		toxin.WithLogLevel(runGlobals.level()),
+		toxin.WithAllowClear(allowClear),
+	)
 }
 
 // printJSON prints v as two-space indented JSON, the shape every subcommand
