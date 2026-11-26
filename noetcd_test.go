@@ -6,6 +6,8 @@ import (
 	"errors"
 	"io"
 	"os"
+	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/shakefu/toxin/internal/log"
@@ -358,6 +360,44 @@ func TestNoEtcdInheritanceSurfacesParentFileCacheError(t *testing.T) {
 	}
 	if logs.Len() != 0 {
 		t.Errorf("parent file-cache failure logged %q, want silence", logs.String())
+	}
+}
+
+// 20-api@Config.Get: a child write completed while the parent file is being
+// read wins over the inherited value returned by that read.
+func TestNoEtcdInheritedResultPreservesConcurrentChildSet(t *testing.T) {
+	clearToxinEnv(t)
+	dir := t.TempDir()
+	fc := NewFileCache("parent/", dir)
+	contents := []byte(`{"app.mode":"standard","padding":"` + strings.Repeat("x", 2<<20) + `"}`)
+	if err := os.WriteFile(fc.Filename(), contents, 0o644); err != nil {
+		t.Fatalf("writing parent cache: %v", err)
+	}
+
+	for i := 0; i < 16; i++ {
+		child, err := New(WithPrefix("child/"), WithFileCache(dir), WithInheritPrefix("parent/"))
+		if err != nil {
+			t.Fatalf("New child: %v", err)
+		}
+		start := make(chan struct{})
+		done := make(chan error, 1)
+		go func() {
+			close(start)
+			_, err := child.Get("app.mode", "fallback")
+			done <- err
+		}()
+		<-start
+		runtime.Gosched()
+		if err := child.Set("app.mode", "custom"); err != nil {
+			t.Fatalf("Set child value: %v", err)
+		}
+		if err := <-done; err != nil {
+			t.Fatalf("concurrent inherited Get: %v", err)
+		}
+		got, err := child.GetStrict("app.mode")
+		if err != nil || got != "custom" {
+			t.Fatalf("iteration %d: inherited read replaced child write with (%v, %v)", i, got, err)
+		}
 	}
 }
 

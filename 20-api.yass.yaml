@@ -109,6 +109,8 @@ RETURN:
   - WHEN: 'etcd is not configured, inheritance is allowed, and the call is not cacheOnly'
     MUST: 'consult the inherited chain before falling back'
     USES: Inheritance
+  - WHEN: 'etcd is not configured and an inherited value is found'
+    MUST: 'insert it into the child cache only if the local setting is still absent'
   - WHEN: 'etcd is configured, the key is unset, a default is given, and the call is not cacheOnly'
     MUST: 'return the default and store it in the cache unless cacheResult is false'
   - WHEN: 'etcd is not configured, the key is unset, a default is given, and the call is not cacheOnly'
