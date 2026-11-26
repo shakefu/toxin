@@ -106,7 +106,11 @@ func (c *Config) lookup(key string, o callConfig) (any, bool, error) {
 				c.log.Warnf("Error getting inherited key: %v", pErr)
 			case pFound:
 				if c.cacheOn && o.cacheResult {
-					c.storeCached(key, pv)
+					if c.client == nil {
+						c.storeCachedIfAbsent(key, pv)
+					} else {
+						c.storeCached(key, pv)
+					}
 				}
 				return pv, true, nil
 			}
