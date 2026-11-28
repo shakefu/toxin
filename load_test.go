@@ -3,8 +3,10 @@ package toxin
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"testing"
 
+	"github.com/shakefu/toxin/internal/etcd"
 	"github.com/shakefu/toxin/internal/testutil"
 )
 
@@ -333,5 +335,194 @@ func TestReloadLoadsAnewAndClearWipesFirst(t *testing.T) {
 	}
 	if stale != nil {
 		t.Errorf("clear flag left the stale cache entry %v", stale)
+	}
+}
+
+// root@Sources and 20-api@Config.Load::SIDE-EFFECT: config files override
+// the etcd namespace per key, etcd-only keys come from etcd, file-only
+// keys from the file, and a default load writes nothing to etcd.
+func TestLoadConfigFilesOverrideEtcd(t *testing.T) {
+	raw := newRawClient(t)
+	// The namespace starts empty even on a repeated run, since the
+	// write-through load below leaves keys behind.
+	_, _, _ = raw.Delete(t.Context(), "/load-cf-etcd", true)
+	rawPut(t, raw, "/load-cf-etcd/shared", `"etcd"`)
+	rawPut(t, raw, "/load-cf-etcd/etcd.only", `"etcd"`)
+	path := writeConfigFile(t, t.TempDir(), "app.json", `{"shared": "file", "file": {"only": "file"}}`)
+
+	t.Setenv("TOXIN_CONFIG", "")
+	c := newTestConfig(t, WithPrefix("load-cf-etcd/"), WithConfigFile(path))
+	if got := getCached(t, c, "shared"); got != "file" {
+		t.Errorf("before Load shared = %v, want the file value", got)
+	}
+	cache, err := c.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	for key, w := range map[string]any{"shared": "file", "etcd.only": "etcd", "file.only": "file"} {
+		if cache[key] != w {
+			t.Errorf("after Load %s = %v, want %v", key, cache[key], w)
+		}
+	}
+	if got, _ := c.Get("etcd.only", nil); got != "etcd" {
+		t.Errorf("Get(etcd.only) = %v, want etcd", got)
+	}
+	if _, ok := rawGet(t, raw, "/load-cf-etcd/file.only"); ok {
+		t.Error("a default Load wrote a config-file key to etcd")
+	}
+	if got, _ := rawGet(t, raw, "/load-cf-etcd/shared"); got != `"etcd"` {
+		t.Errorf("raw shared = %s, want etcd untouched by a default Load", got)
+	}
+
+	// An explicit write-through load is the one way file values reach etcd.
+	if _, err := c.Load(CacheOnly(false)); err != nil {
+		t.Fatalf("Load(cacheOnly false): %v", err)
+	}
+	if got, _ := rawGet(t, raw, "/load-cf-etcd/file.only"); got != "file" {
+		t.Errorf("raw file.only = %q, want it written by Load(CacheOnly(false))", got)
+	}
+}
+
+// root@Sources and 20-api@Config.Load::SIDE-EFFECT: config files overlay a
+// cache file that was read, without rewriting the cache file or the
+// config files.
+func TestLoadConfigFilesOverlayFileCache(t *testing.T) {
+	cacheDir := t.TempDir()
+	seed := NewFileCache("load-cf-fc/", cacheDir)
+	if err := seed.Save(map[string]any{"shared": "cache", "cache.only": "cache"}); err != nil {
+		t.Fatalf("seeding the cache file: %v", err)
+	}
+	cacheBefore, err := os.ReadFile(seed.Filename())
+	if err != nil {
+		t.Fatalf("reading the cache file: %v", err)
+	}
+	cfgBody := `{"shared": "file", "file": {"only": "file"}}`
+	path := writeConfigFile(t, t.TempDir(), "app.json", cfgBody)
+
+	clearConfigEnv(t)
+	t.Setenv("TOXIN_ETCD", testutil.Etcd(t))
+	t.Setenv("TOXIN_CACHE", cacheDir)
+	c, err := New(WithPrefix("load-cf-fc/"), WithConfigFile(path))
+	if err != nil {
+		t.Fatalf("toxin.New: %v", err)
+	}
+	cache, err := c.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	for key, w := range map[string]any{"shared": "file", "cache.only": "cache", "file.only": "file"} {
+		if cache[key] != w {
+			t.Errorf("after Load %s = %v, want %v", key, cache[key], w)
+		}
+	}
+	if after, _ := os.ReadFile(seed.Filename()); string(after) != string(cacheBefore) {
+		t.Errorf("cache file rewritten by a file-cache load: %s", after)
+	}
+	if after, _ := os.ReadFile(path); string(after) != cfgBody {
+		t.Errorf("config file modified by a load: %s", after)
+	}
+
+	// A malformed config file on a clearing reload keeps every live value.
+	writeConfigFile(t, filepath.Dir(path), filepath.Base(path), `{`)
+	assertConfigError(t, c.Reload(true), path)
+	if got := getCached(t, c, "cache.only"); got != "cache" {
+		t.Errorf("after failed Reload(true) cache.only = %v, want cache", got)
+	}
+	if got := getCached(t, c, "shared"); got != "file" {
+		t.Errorf("after failed Reload(true) shared = %v, want file", got)
+	}
+}
+
+// 20-api@toxin.Reload: a clearing reload against etcd re-reads the config
+// files, which still override the reloaded namespace.
+func TestReloadClearRereadsConfigFilesOverEtcd(t *testing.T) {
+	raw := newRawClient(t)
+	rawPut(t, raw, "/reload-cf/shared", `"etcd"`)
+	dir := t.TempDir()
+	path := writeConfigFile(t, dir, "app.json", `{"shared": "v1"}`)
+
+	t.Setenv("TOXIN_CONFIG", "")
+	c := newTestConfig(t, WithPrefix("reload-cf/"), WithConfigFile(path))
+	hooks := 0
+	c.AddReloadHook(func() { hooks++ })
+	writeConfigFile(t, dir, "app.json", `{"shared": "v2"}`)
+	if err := c.Reload(true); err != nil {
+		t.Fatalf("Reload(true): %v", err)
+	}
+	if got := getCached(t, c, "shared"); got != "v2" {
+		t.Errorf("after Reload(true) shared = %v, want the edited file value", got)
+	}
+
+	writeConfigFile(t, dir, "app.json", `[]`)
+	assertConfigError(t, c.Reload(true), path)
+	if got := getCached(t, c, "shared"); got != "v2" {
+		t.Errorf("after failed Reload(true) shared = %v, want v2 kept", got)
+	}
+	if hooks != 1 {
+		t.Errorf("hooks ran %d times, want 1 (none for the failed reload)", hooks)
+	}
+}
+
+// 20-api@Config.Load::SIDE-EFFECT: a write-through load of a supplied
+// config writes the active config-file values too, the supplied config
+// winning per key.
+func TestLoadSuppliedConfigWriteThroughIncludesConfigFiles(t *testing.T) {
+	raw := newRawClient(t)
+	_, _, _ = raw.Delete(t.Context(), "/load-cf-given", true)
+	path := writeConfigFile(t, t.TempDir(), "app.json", `{"shared": "file", "file": {"only": "file"}}`)
+
+	t.Setenv("TOXIN_CONFIG", "")
+	c := newTestConfig(t, WithPrefix("load-cf-given/"), WithConfigFile(path))
+	_, err := c.Load(
+		WithConfig(map[string]any{"shared": "given", "given": map[string]any{"only": "given"}}),
+		CacheOnly(false),
+	)
+	if err != nil {
+		t.Fatalf("Load(WithConfig, CacheOnly(false)): %v", err)
+	}
+	for key, want := range map[string]string{
+		"shared": "given", "file.only": "file", "given.only": "given",
+	} {
+		if got, ok := rawGet(t, raw, "/load-cf-given/"+key); !ok || got != want {
+			t.Errorf("raw %s = %q (%v), want %q", key, got, ok, want)
+		}
+	}
+}
+
+// 20-api@Config.Load::SIDE-EFFECT and 10-etcd3@ValueEncoding: config-file
+// values written through to etcd keep their JSON types: a json.Number
+// stays exact and a map value stays an object.
+func TestLoadWriteThroughKeepsConfigFileTypes(t *testing.T) {
+	raw := newRawClient(t)
+	_, _, _ = raw.Delete(t.Context(), "/load-cf-types", true)
+	path := writeConfigFile(t, t.TempDir(), "app.json",
+		`{"big": 9007199254740993, "empty": {}, "already.dotted": {"kept": "whole"}}`)
+
+	t.Setenv("TOXIN_CONFIG", "")
+	c := newTestConfig(t, WithPrefix("load-cf-types/"), WithConfigFile(path))
+	if _, err := c.Load(CacheOnly(false)); err != nil {
+		t.Fatalf("Load(CacheOnly(false)): %v", err)
+	}
+
+	stored, ok := rawGet(t, raw, "/load-cf-types/big")
+	if !ok || stored != "9007199254740993" {
+		t.Errorf("raw big = %q (%v), want the exact number", stored, ok)
+	}
+	if n, ok := etcd.DecodeValue(stored).(json.Number); !ok || n.String() != "9007199254740993" {
+		t.Errorf("decoded big = %#v, want json.Number 9007199254740993", etcd.DecodeValue(stored))
+	}
+	for key, want := range map[string]map[string]any{
+		"empty":          {},
+		"already.dotted": {"kept": "whole"},
+	} {
+		stored, ok := rawGet(t, raw, "/load-cf-types/"+key)
+		if !ok {
+			t.Errorf("raw %s missing", key)
+			continue
+		}
+		decoded, isMap := etcd.DecodeValue(stored).(map[string]any)
+		if !isMap || !jsonEqual(t, decoded, want) {
+			t.Errorf("decoded %s = %#v from %q, want the object %v", key, etcd.DecodeValue(stored), stored, want)
+		}
 	}
 }

@@ -52,6 +52,11 @@ content: |
                          control. (from JETCONFIG_LOGLEVEL)
     TOXIN_CACHE          Directory for the file cache.
                          (from JETCONFIG_CACHE)
+    TOXIN_CONFIG         Comma-separated JSON config file paths; entries
+                         are trimmed and blank entries dropped. The files
+                         are read after, and so override, the config
+                         files given programmatically. No config files by
+                         default. (new in toxin)
     TOXIN_WATCH          Any non-empty value enables watching.
                          (from PYCONFIG_ETCD_WATCH)
     TOXIN_INHERIT_DEPTH  Maximum inheritance depth; default 2.
@@ -64,9 +69,45 @@ content: |
   instance: a Config constructed with WithEnv(false) reads none of them and
   takes its runtime configuration from its options and defaults alone.
 
+  WithEnv(false) turns off TOXIN_CONFIG like every other variable here;
+  config files given programmatically still apply.
+
   Per-setting environment overrides are not runtime configuration and
   carry no TOXIN_ prefix: toxin.Env checks the setting name uppercased
   with dots replaced by underscores.
+---
+design: Sources
+type: procedure
+content: |
+  A setting's value resolves from these sources, lowest precedence first;
+  each later source wins over the earlier ones per key, and the caller's
+  default answers only when no source defines the key:
+
+  1. The inherited chain, parent first.
+  2. The configuration's own etcd namespace, or the file cache standing in
+     for it.
+  3. JSON config files, in their effective order: those given
+     programmatically, then those named by TOXIN_CONFIG; a later file wins
+     over an earlier one per key.
+  4. Explicit in-process writes made after the last load: Set, and Load
+     with a supplied config.
+
+  Config files are read and parsed at construction and again on every
+  load without a supplied config; their keys are served from the settings
+  cache with no load and, without etcd, no network I/O. Each file holds
+  one JSON object, flattened into dot-notation keys like a supplied
+  config. All files are read before the cache is touched, so a file that
+  cannot be read fails the load and leaves the live settings intact.
+  Config files are read-only to toxin: they are never written, and their
+  values reach etcd only through a load that explicitly writes through.
+  An etcd watch event does not displace a config-file value, and a watched
+  directory delete keeps them. Clear is an explicit in-process action that
+  outranks the files: it empties their values too, and etcd events apply
+  to those keys again until the next load re-reads the files.
+  Because they are served through the settings cache, a configuration
+  with caching disabled, or a read that bypasses the cache, does not
+  consult them; with etcd, such a bypassing read that caches its result
+  replaces the config-file value until the next load.
 ---
 spec: toxin
 INPUT:
@@ -83,6 +124,9 @@ INPUT:
     SEE: 30-cli@cli.Main
   - MUST: 'address settings by dot-notation keys resolved under a namespace prefix'
     USES: 10-etcd3@EtcdKeys
+  - MUST: 'accept JSON config files, given programmatically or by `TOXIN_CONFIG`, as a configuration source that works with or without etcd'
+    SEE: 20-api@toxin.New
+    USES: Sources
 RETURN:
   - WHEN: 'etcd is configured'
     MUST: 'yield values decoded from JSON storage, falling back to the raw stored string when it is not valid JSON'
@@ -97,17 +141,21 @@ SIDE-EFFECT:
   - WHEN: 'etcd is configured'
     MUST: 'store and read configuration in an etcd v3 cluster, version 3.3 or newer, over gRPC'
   - WHEN: 'etcd is not configured'
-    MUST: 'resolve configuration from in-process values, supplied maps, the file cache, and caller-supplied defaults'
+    MUST: 'resolve configuration from in-process values, supplied maps, the file cache, config files, and caller-supplied defaults'
+    USES: Sources
   - WHEN: 'etcd is not configured'
     MUST-NOT: 'create an etcd client or dial a cluster'
   - WHEN: 'etcd is not configured'
     MUST-NOT: 'start a watcher or emit a log message'
   - MUST-NOT: 'read or write any etcd key outside the configured namespace prefix'
+  - MUST-NOT: 'write to a config file'
+    USES: Sources
 INVARIANT:
   - USES: EnvNaming
   - USES: 10-etcd3@ValueEncoding
   - USES: 10-etcd3@EtcdKeys
   - USES: 20-api@Inheritance
+  - USES: Sources
   - WHEN: 'case sensitivity is not enabled at construction'
     MUST: 'treat keys as case-insensitive, lowercasing them for storage and lookup'
   - WHEN: 'case sensitivity is enabled at construction'

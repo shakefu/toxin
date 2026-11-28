@@ -272,3 +272,113 @@ func TestCloseStopsWatcherAndSucceedsTwice(t *testing.T) {
 
 // compile-time check that the etcd import stays used by the raw helpers.
 var _ = etcd.TrimKey
+
+// 20-api@Config.Watch::SIDE-EFFECT: etcd set and delete events for a key a
+// config file supplies leave the config-file value in place, keys no file
+// supplies still follow etcd, and a directory delete with clearing allowed
+// keeps the config-file values.
+func TestWatchDoesNotDisplaceConfigFileValues(t *testing.T) {
+	raw := newRawClient(t)
+	path := writeConfigFile(t, t.TempDir(), "app.json", `{"app": {"key": "file"}}`)
+	t.Setenv("TOXIN_CONFIG", "")
+	c := newTestConfig(t, WithPrefix("watch-cf/"), WithWatch(true), WithAllowClear(true), WithConfigFile(path))
+	t.Cleanup(func() { _ = c.Close() })
+	ensureWatching(t, raw, c, "watch-cf/")
+
+	rawPut(t, raw, "/watch-cf/app.key", `"etcd"`)
+	rawPut(t, raw, "/watch-cf/app.free", `"etcd"`)
+	waitFor(t, 10*time.Second, "the non-overridden key to follow etcd", func() bool {
+		got, _ := c.Get("app.free", nil, CacheOnly(true))
+		return got == "etcd"
+	})
+	if got, _ := c.Get("app.key", nil, CacheOnly(true)); got != "file" {
+		t.Errorf("after an etcd set app.key = %v, want the config-file value", got)
+	}
+
+	if _, _, err := raw.Delete(t.Context(), "/watch-cf/app.key", false); err != nil {
+		t.Fatalf("raw delete: %v", err)
+	}
+	if _, _, err := raw.Delete(t.Context(), "/watch-cf/app.free", false); err != nil {
+		t.Fatalf("raw delete: %v", err)
+	}
+	waitFor(t, 10*time.Second, "the non-overridden key's delete", func() bool {
+		got, _ := c.Get("app.free", nil, CacheOnly(true))
+		return got == nil
+	})
+	if got, _ := c.Get("app.key", nil, CacheOnly(true)); got != "file" {
+		t.Errorf("after an etcd delete app.key = %v, want the config-file value", got)
+	}
+
+	rawPut(t, raw, "/watch-cf/one", "1")
+	rawPut(t, raw, "/watch-cf/two", "2")
+	waitFor(t, 10*time.Second, "both watched keys to reach the cache", func() bool {
+		a, _ := c.Get("one", nil, CacheOnly(true))
+		b, _ := c.Get("two", nil, CacheOnly(true))
+		return a != nil && b != nil
+	})
+	if _, _, err := raw.Delete(t.Context(), "/watch-cf", true); err != nil {
+		t.Fatalf("raw recursive delete: %v", err)
+	}
+	waitFor(t, 10*time.Second, "the directory delete to empty the etcd-sourced keys", func() bool {
+		a, _ := c.Get("one", nil, CacheOnly(true))
+		return a == nil
+	})
+	snapshot := c.cacheSnapshot()
+	if len(snapshot) != 1 || snapshot["app.key"] != "file" {
+		t.Errorf("cache after a directory delete = %v, want only the config-file value", snapshot)
+	}
+}
+
+// root@Sources and 20-api@Config.Watch: Clear outranks the config files,
+// so etcd events apply to their keys again until the next load re-reads
+// the files.
+func TestWatchAppliesToConfigFileKeysAfterClear(t *testing.T) {
+	raw := newRawClient(t)
+	path := writeConfigFile(t, t.TempDir(), "app.json", `{"app": {"key": "file"}}`)
+	t.Setenv("TOXIN_CONFIG", "")
+	c := newTestConfig(t, WithPrefix("watch-cf-clear/"), WithWatch(true), WithAllowClear(true), WithConfigFile(path))
+	t.Cleanup(func() { _ = c.Close() })
+	ensureWatching(t, raw, c, "watch-cf-clear/")
+
+	if err := c.Clear(); err != nil {
+		t.Fatalf("Clear: %v", err)
+	}
+	rawPut(t, raw, "/watch-cf-clear/app.key", `"etcd"`)
+	waitFor(t, 10*time.Second, "the etcd value to reach the cleared config-file key", func() bool {
+		got, _ := c.Get("app.key", nil, CacheOnly(true))
+		return got == "etcd"
+	})
+
+	if _, err := c.Load(); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got, _ := c.Get("app.key", nil, CacheOnly(true)); got != "file" {
+		t.Errorf("after Load app.key = %v, want the re-read config-file value", got)
+	}
+}
+
+// root@Sources: a Set on a config-file key outranks both the file and a
+// later etcd event for that key.
+func TestWatchKeepsSetValueOnConfigFileKey(t *testing.T) {
+	raw := newRawClient(t)
+	path := writeConfigFile(t, t.TempDir(), "app.json", `{"app": {"key": "file"}}`)
+	t.Setenv("TOXIN_CONFIG", "")
+	c := newTestConfig(t, WithPrefix("watch-cf-set/"), WithWatch(true), WithConfigFile(path))
+	t.Cleanup(func() { _ = c.Close() })
+	ensureWatching(t, raw, c, "watch-cf-set/")
+
+	if err := c.Set("app.key", "set"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	rawPut(t, raw, "/watch-cf-set/app.key", `"external"`)
+	// Events arrive in revision order: once the sentinel is cached, the
+	// app.key events were applied or skipped.
+	rawPut(t, raw, "/watch-cf-set/zzsentinel", `"seen"`)
+	waitFor(t, 10*time.Second, "the sentinel event", func() bool {
+		got, _ := c.Get("zzsentinel", nil, CacheOnly(true))
+		return got == "seen"
+	})
+	if got, _ := c.Get("app.key", nil, CacheOnly(true)); got != "set" {
+		t.Errorf("app.key = %v, want the Set value kept over the etcd event", got)
+	}
+}

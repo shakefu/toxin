@@ -37,6 +37,7 @@ type options struct {
 	allowClear    bool
 	logLevel      string
 	fileCache     string
+	configFiles   []string
 	env           bool
 
 	prefixSet bool
@@ -125,10 +126,32 @@ func WithFileCache(dir string) Option {
 	return func(o *options) { o.fileCache = dir }
 }
 
+// WithConfigFile adds JSON config files to the configuration's sources.
+// The path is split on commas, each entry trimmed and blank entries
+// dropped. Each file must hold a single JSON object; its nested maps
+// flatten into dot-notation keys the way Load(WithConfig(...)) does. Files
+// apply in the order given, after the inherited chain and the etcd
+// namespace or file cache and before explicit in-process writes, and a
+// later file wins over an earlier one per key. Repeated config-file options
+// append. TOXIN_CONFIG, when environment reading is on, appends its files
+// after these.
+func WithConfigFile(path string) Option {
+	return WithConfigFiles(path)
+}
+
+// WithConfigFiles adds several JSON config files to the configuration's
+// sources, in order; each entry may itself be comma-separated. See
+// WithConfigFile.
+func WithConfigFiles(paths ...string) Option {
+	return func(o *options) {
+		o.configFiles = append(o.configFiles, splitConfigFiles(paths...)...)
+	}
+}
+
 // WithEnv turns reading of toxin's TOXIN_* runtime environment variables
 // on or off; it is on by default. With WithEnv(false), New reads none of
 // TOXIN_ETCD, TOXIN_AUTH, TOXIN_SSL_CA, TOXIN_SSL_CERT, TOXIN_SSL_KEY,
-// TOXIN_LOGLEVEL, TOXIN_CACHE, TOXIN_PREFIX, TOXIN_WATCH and
+// TOXIN_LOGLEVEL, TOXIN_CACHE, TOXIN_CONFIG, TOXIN_PREFIX, TOXIN_WATCH and
 // TOXIN_INHERIT_DEPTH, and the Config is built from its options and the
 // defaults alone. Per-setting overrides read by toxin.Env are unaffected.
 func WithEnv(on bool) Option {
@@ -149,6 +172,7 @@ type Config struct {
 	inheritDepth  int
 	log           *log.Logger
 	fileCache     *FileCache
+	configFiles   []string // the effective config-file order
 
 	// parent is the resolved parent configuration: fixed at construction
 	// for constructor-based inheritance, or resolved from the inherit key
@@ -160,6 +184,11 @@ type Config struct {
 	mu    sync.Mutex
 	cache map[string]any
 	hooks []func()
+	// fileOverrides holds the config-file keys and values the last read of
+	// the config files produced; etcd watch events do not displace them.
+	// Guarded by mu, so a watch event's check and store are atomic with
+	// respect to a load's overlay.
+	fileOverrides map[string]any
 
 	// resolveMu serializes inheritance state and lazy resolution of parent.
 	resolveMu sync.Mutex
@@ -178,13 +207,16 @@ type Config struct {
 // programmatic list. Other defaults are prefix "config/", caching on, case
 // sensitivity off, inheritance on with inherit key "config.inherit" and
 // depth two, watching off, clearing off, and log level critical.
-// TOXIN_LOGLEVEL overrides the log level option and TOXIN_CACHE supplies
-// the file cache directory; TOXIN_PREFIX, TOXIN_WATCH and
+// TOXIN_LOGLEVEL overrides the log level option, TOXIN_CACHE supplies
+// the file cache directory, and TOXIN_CONFIG appends config files after
+// those given by WithConfigFile and WithConfigFiles; TOXIN_PREFIX, TOXIN_WATCH and
 // TOXIN_INHERIT_DEPTH are consulted only when the corresponding option is
 // not supplied. WithEnv(false) turns off every TOXIN_* variable for this
 // instance. Watching starts at construction when enabled with etcd, and
 // a configured file cache directory is created and opened at construction.
-// The etcd client's diagnostics go through the Config's levelled logger.
+// Every config file is read and parsed at construction, failing with
+// "Could not read toxin config: <cause>", and its keys are served at once
+// without a Load. The etcd client's diagnostics go through the Config's levelled logger.
 func New(opts ...Option) (*Config, error) {
 	o := options{
 		prefix:       "config/",
@@ -225,6 +257,9 @@ func New(opts ...Option) (*Config, error) {
 				o.watch = true
 			}
 		}
+		if v := os.Getenv("TOXIN_CONFIG"); v != "" {
+			o.configFiles = append(o.configFiles, splitConfigFiles(v)...)
+		}
 		etcdEnv = etcd.ReadEnv()
 	}
 
@@ -253,6 +288,21 @@ func New(opts ...Option) (*Config, error) {
 		inheritDepth:  o.inheritDepth,
 		log:           log.New(os.Stderr, level),
 		cache:         map[string]any{},
+		configFiles:   o.configFiles,
+	}
+
+	// Config files are read before anything else is opened, so a bad file
+	// fails construction fast and without side effects.
+	files, err := c.readConfigFiles()
+	if err != nil {
+		return nil, err
+	}
+	if c.cacheOn {
+		c.overlayConfigFiles(files)
+	} else {
+		// Recorded but never served: Get reads config-file values only
+		// from the cache, which is disabled.
+		c.fileOverrides = files
 	}
 
 	if o.fileCache != "" {
@@ -466,18 +516,15 @@ func (c *Config) storeCachedIfAbsent(key string, value any) {
 	}
 }
 
-// dropCached drops one cached setting.
-func (c *Config) dropCached(key string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	delete(c.cache, key)
-}
-
-// emptyCache empties the cache.
+// emptyCache empties the cache and forgets the active config-file
+// overrides: Clear is an explicit in-process action and outranks the config
+// files, so after it etcd watch events apply to every key again until the
+// next load re-reads the files.
 func (c *Config) emptyCache() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.cache = map[string]any{}
+	c.fileOverrides = nil
 }
 
 // cacheSnapshot copies the cache map.

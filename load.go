@@ -15,39 +15,62 @@ import (
 // nested empty map is stored as an empty map value. Without one, the
 // configuration comes from a configured file cache when its file exists,
 // otherwise from etcd under the prefix, or from an empty external source
-// when etcd is not configured.
+// when etcd is not configured, and then every configured config file is
+// read anew from disk and overlaid on it, a later file winning per key.
 //
 // The per-call options default to cacheOnly true, merge true,
 // allowInherited true and fileCacheOnly false. A cache file that was read
 // populates the cache without contacting etcd, clearing the cache or
-// saving the cache file. Otherwise, with fileCacheOnly unset, a merge of
-// false clears the cache before loading, the loaded keys are merged into
-// the cache, cacheOnly false writes every loaded key to configured etcd —
+// saving the cache file; the config files still overlay it. Otherwise,
+// with fileCacheOnly unset, a merge of false clears the cache before
+// loading, the loaded keys are merged into the cache, cacheOnly false
+// writes every loaded key, config-file keys included, to configured etcd —
 // merged over what exists rather than replacing it — and a configured file
-// cache is saved after loading. FileCacheOnly never contacts etcd. The
-// registered reload hooks run after the load.
+// cache is saved after loading. FileCacheOnly never contacts etcd. Config
+// files are never written. The registered reload hooks run after the load.
+//
+// Every source is read before the cache is touched: a config file that
+// cannot be read fails the load with "Could not read toxin config:
+// <cause>", leaves the live settings intact and runs no reload hooks. A
+// failure to save the cache file is different: it is returned after the
+// loaded settings were installed and before the reload hooks run.
 func (c *Config) Load(opts ...CallOption) (map[string]any, error) {
-	o := loadDefaults(opts)
+	return c.load(loadDefaults(opts), false)
+}
 
-	var flat map[string]any
+// load performs Load; with clear set the cache is wiped as the loaded
+// sources are installed, after every source was read successfully.
+func (c *Config) load(o callConfig, clear bool) (map[string]any, error) {
+	var flat, files map[string]any
+	// A supplied config is an explicit in-process write: it does not
+	// re-read the config files.
+	reread := !o.hasConfig
 	if o.hasConfig {
 		flat = flattenConfig(o.config)
+	} else {
+		var err error
+		if files, err = c.readConfigFiles(); err != nil {
+			return nil, err
+		}
 	}
 
 	// A configured file cache stands in for etcd when no config was given;
 	// fileCacheOnly never contacts etcd at all.
 	if o.fileCacheOnly || (flat == nil && c.fileCache != nil) {
 		if c.fileCache != nil {
-			read, err := c.readFileCache()
+			cached := map[string]any{}
+			read, err := c.fileCache.Load(cached)
 			if err != nil {
 				return nil, err
 			}
 			if read {
+				c.install(clear, true, cached, reread, files)
 				c.runHooks()
 				return c.cacheSnapshot(), nil
 			}
 		}
 		if o.fileCacheOnly {
+			c.install(clear, false, nil, reread, files)
 			c.runHooks()
 			return c.cacheSnapshot(), nil
 		}
@@ -71,13 +94,29 @@ func (c *Config) Load(opts ...CallOption) (map[string]any, error) {
 		flat = lowered
 	}
 
-	if !o.merge {
-		c.emptyCache()
-	}
-	c.mergeIntoCache(flat)
+	c.install(clear || !o.merge, false, flat, reread, files)
 
 	if !o.cacheOnly && c.client != nil {
-		for k, v := range flat {
+		// Config-file values reach etcd only on an explicit write-through
+		// load. A re-read file wins over the loaded namespace, as it does in
+		// the cache; a supplied config wins over the active file values.
+		written := map[string]any{}
+		if reread {
+			for k, v := range flat {
+				written[k] = v
+			}
+			for k, v := range files {
+				written[k] = v
+			}
+		} else {
+			for k, v := range c.fileOverridesSnapshot() {
+				written[k] = v
+			}
+			for k, v := range flat {
+				written[k] = v
+			}
+		}
+		for k, v := range written {
 			if err := c.Set(k, v); err != nil {
 				return nil, err
 			}
@@ -94,6 +133,39 @@ func (c *Config) Load(opts ...CallOption) (map[string]any, error) {
 	return c.cacheSnapshot(), nil
 }
 
+// install applies one load to the cache under a single lock. With clear
+// the cache is emptied first, keeping the active config-file overrides when
+// the files are not re-read, since a supplied config outranks them only per
+// key. The loaded source map is merged in, only into absent keys when
+// fillAbsent (the file cache's rule, so fresh values win). With reread the
+// config files overlay the result and become the active overrides.
+func (c *Config) install(clear, fillAbsent bool, loaded map[string]any, reread bool, files map[string]any) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if clear {
+		c.cache = map[string]any{}
+		if !reread {
+			for k, v := range c.fileOverrides {
+				c.cache[k] = v
+			}
+		}
+	}
+	for k, v := range loaded {
+		if fillAbsent {
+			if _, ok := c.cache[k]; ok {
+				continue
+			}
+		}
+		c.cache[k] = v
+	}
+	if reread {
+		for k, v := range files {
+			c.cache[k] = v
+		}
+		c.fileOverrides = files
+	}
+}
+
 // readFileCache fills the cache from the cache file, only for keys not
 // already present, reporting whether cached data was read.
 func (c *Config) readFileCache() (bool, error) {
@@ -102,22 +174,12 @@ func (c *Config) readFileCache() (bool, error) {
 	return c.fileCache.Load(c.cache)
 }
 
-// mergeIntoCache merges the loaded keys into the cache.
-func (c *Config) mergeIntoCache(loaded map[string]any) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	for k, v := range loaded {
-		c.cache[k] = v
-	}
-}
-
 // Reload loads the configuration anew; with clear set the cached settings
-// are wiped before loading.
+// are wiped before loading. Every source, the config files included, is
+// read before anything is wiped, so a failed reload leaves the previous
+// settings intact and runs no reload hooks.
 func (c *Config) Reload(clear bool) error {
-	if clear {
-		c.emptyCache()
-	}
-	_, err := c.Load()
+	_, err := c.load(loadDefaults(nil), clear)
 	return err
 }
 
