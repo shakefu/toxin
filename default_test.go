@@ -83,6 +83,13 @@ func TestDefaultSharedInstanceAndPackageShortcuts(t *testing.T) {
 		if err.Error() != "clear() is not allowed on this instance" {
 			t.Errorf("package Clear error = %q, want the shared instance's guard error", err.Error())
 		}
+		if err := Clear(CacheOnly(true)); err != nil {
+			t.Errorf("package Clear(cacheOnly): %v", err)
+		}
+		got, err := Get("app.key", nil, CacheOnly(true))
+		if err != nil || got != nil {
+			t.Errorf("package Get after Clear(cacheOnly) = %v, %v; want empty", got, err)
+		}
 	})
 
 	t.Run("package ReloadHook and Reload run in registration order", func(t *testing.T) {
@@ -97,7 +104,8 @@ func TestDefaultSharedInstanceAndPackageShortcuts(t *testing.T) {
 			t.Errorf("hook order = %v, want [first second] on the shared instance", order)
 		}
 
-		// The reload reloaded the shared instance's namespace from etcd:
+		// This reload restores the shared cache emptied by the earlier
+		// package Clear(cacheOnly) subtest from etcd:
 		// with the cache file out of the way and the in-memory cache
 		// cleared directly, the value written through package Set comes
 		// back.

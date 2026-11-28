@@ -379,8 +379,8 @@ func TestNoEtcdDumpDoesNotResolveInheritance(t *testing.T) {
 	}
 }
 
-// The issue #14 cache-only clear guard is intentionally unchanged in this slice.
-func TestNoEtcdClearRetainsAllowClearGuard(t *testing.T) {
+// 20-api@Config.Clear::SIDE-EFFECT: without etcd, Clear empties the cache without error.
+func TestNoEtcdClearSucceedsWithoutAllowClear(t *testing.T) {
 	clearToxinEnv(t)
 	c, err := New()
 	if err != nil {
@@ -389,12 +389,22 @@ func TestNoEtcdClearRetainsAllowClearGuard(t *testing.T) {
 	if err := c.Set("app.key", "kept"); err != nil {
 		t.Fatalf("Set: %v", err)
 	}
-	if err := c.Clear(CacheOnly(true)); err == nil || err.Error() != "clear() is not allowed on this instance" {
-		t.Errorf("Clear(cacheOnly) guard error = %v, want the existing allowClear error", err)
+	if err := c.Clear(CacheOnly(true)); err != nil {
+		t.Fatalf("Clear(cacheOnly): %v", err)
 	}
 	got, err := c.Get("app.key", nil, CacheOnly(true))
-	if err != nil || got != "kept" {
-		t.Errorf("guarded Clear changed the cache to %v, want kept", got)
+	if err != nil || got != nil {
+		t.Errorf("cache after Clear(cacheOnly) = %v, want empty", got)
+	}
+	if err := c.Set("app.key", "kept"); err != nil {
+		t.Fatalf("Set again: %v", err)
+	}
+	if err := c.Clear(); err != nil {
+		t.Fatalf("Clear without etcd: %v", err)
+	}
+	got, err = c.Get("app.key", nil, CacheOnly(true))
+	if err != nil || got != nil {
+		t.Errorf("cache after Clear = %v, want empty", got)
 	}
 }
 

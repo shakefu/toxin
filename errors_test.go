@@ -193,8 +193,8 @@ func TestDumpNotFoundRendersKeyNotFound(t *testing.T) {
 	}
 }
 
-// 20-api@Config.Clear::ERROR: Clear with the allowClear option off
-// returns the error "clear() is not allowed on this instance".
+// 20-api@Config.Clear::ERROR: with allowClear off, cacheOnly unset and etcd
+// configured, Clear returns the guard error; Clear(CacheOnly(true)) succeeds.
 func TestClearNotAllowedWithoutAllowClear(t *testing.T) {
 	c := newTestConfig(t, WithPrefix("err-noclear/"), WithAllowClear(false))
 
@@ -204,6 +204,9 @@ func TestClearNotAllowedWithoutAllowClear(t *testing.T) {
 	}
 	if err.Error() != "clear() is not allowed on this instance" {
 		t.Errorf("error = %q, want %q", err.Error(), "clear() is not allowed on this instance")
+	}
+	if err := c.Clear(CacheOnly(true)); err != nil {
+		t.Errorf("Clear(cacheOnly): %v", err)
 	}
 }
 

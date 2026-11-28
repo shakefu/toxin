@@ -234,18 +234,20 @@ spec: Config.Clear
 INPUT:
   - MUST: 'take an option cacheOnly defaulting to false'
 ERROR:
-  - WHEN: 'the allowClear option is off'
+  - WHEN: 'the allowClear option is off, cacheOnly is unset, and etcd is configured'
     MUST: 'return the error "clear() is not allowed on this instance"'
 SIDE-EFFECT:
-  - WHEN: 'cacheOnly is unset and etcd is configured'
+  - WHEN: 'cacheOnly is unset, the allowClear option is on, and etcd is configured'
     MUST: 'recursively delete the prefix namespace'
     SEE: 10-etcd3@etcd.Delete
-  - WHEN: 'etcd is configured and the namespace is already empty'
+  - WHEN: 'cacheOnly is unset, the allowClear option is on, etcd is configured, and the namespace is already empty'
     MUST: 'succeed without error and leave the cache as it is'
-  - WHEN: 'cacheOnly is set or the namespace delete removed entries'
+  - WHEN: 'cacheOnly is set'
+    MUST: 'empty the cache without requiring allowClear and without contacting etcd'
+  - WHEN: 'the namespace delete removed entries'
     MUST: 'empty the cache'
   - WHEN: 'cacheOnly is unset and etcd is not configured'
-    MUST: 'empty the cache without error'
+    MUST: 'empty the cache without error and without requiring allowClear'
 ---
 spec: Config.Watch
 INPUT:
