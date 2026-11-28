@@ -2,6 +2,22 @@
 All notable changes to this project will be documented in this file. See [conventional commits](https://www.conventionalcommits.org/) for commit guidelines.
 
 - - -
+## v0.2.0 - 2026-11-28
+#### Features
+- <span style="background-color: #d73a49; color: white; padding: 2px 6px; border-radius: 3px; font-weight: bold; font-size: 0.85em;">BREAKING</span>address optional-etcd review findings - (3f925b4) - Jacob Alheid
+#### Bug Fixes
+- preserve child writes during inherited reads - (0053d00) - Jacob Alheid
+- make etcd optional for library configuration - (458e71b) - Jacob Alheid
+#### Documentation
+- drop the stale no-release-tag note - (6e4e14b) - Jacob Alheid
+#### Tests
+- bound FIFO race cleanup - (b9b3cc8) - Jacob Alheid
+- enforce inherited-read race ordering - (a882acd) - Jacob Alheid
+#### Miscellaneous Chores
+- (**deps**) pin yass to 0.13.3 - (23fa49d) - Jacob Alheid, *Claude Opus 5.5*
+
+- - -
+
 ## v0.1.1 - 2026-11-14
 #### Bug Fixes
 - (**deps**) bump go.opentelemetry.io/otel to v1.47.0 - (0df9398) - Jacob Alheid
