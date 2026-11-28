@@ -70,6 +70,17 @@ INPUT:
   - WHEN: 'a file cache is configured'
     MUST: 'create the cache directory and open a file in it at construction'
     SEE: toxin.FileCache
+  - MUST: 'take config-file options, single and multiple, that append JSON config file paths in order, splitting each entry on commas, trimming whitespace, and dropping blank entries'
+    USES: root@Sources
+  - WHEN: 'environment reading is enabled'
+    MUST: 'append the config files named by `TOXIN_CONFIG` after the programmatic ones, so they win per key'
+    USES: root@EnvNaming
+  - WHEN: 'environment reading is disabled'
+    MUST: 'ignore `TOXIN_CONFIG` and still apply the programmatic config files'
+    USES: root@EnvNaming
+  - WHEN: 'config files are configured'
+    MUST: 'read and parse every config file at construction and, with caching enabled, serve their flattened keys at once, with no load and, without etcd, no network I/O'
+    USES: root@Sources
   - CONFORMS: 10-etcd3@etcd.Client::INPUT
   - CONFORMS: 10-etcd3@etcd.Client::ERROR
 RETURN:
@@ -87,6 +98,9 @@ ERROR:
     USES: root@EnvNaming
   - WHEN: 'a file cache is configured and the cache directory cannot be created or a file in it cannot be opened'
     MUST: 'reject with the error "Could not open toxin cache: <cause>"'
+  - WHEN: 'a config file is missing or unreadable, holds malformed JSON or trailing data after its value, or holds a top-level value other than an object'
+    MUST: 'reject with the error "Could not read toxin config: <cause>", the cause naming the file path'
+    USES: root@Sources
 ---
 spec: Config.Endpoints
 RETURN:
@@ -207,6 +221,11 @@ INPUT:
   - WHEN: 'no config is given, no cache file was read, fileCacheOnly is unset, and etcd is not configured'
     MUST: 'load an empty source map'
     SEE: Config.Dump
+  - WHEN: 'no config is given'
+    MUST: 'read every configured config file anew from disk before touching the cache'
+    USES: root@Sources
+  - WHEN: 'a config is given'
+    MUST-NOT: 're-read the config files'
 RETURN:
   - MUST: 'return the resulting cache map'
   - WHEN: 'the loaded source holds no keys'
@@ -220,11 +239,27 @@ SIDE-EFFECT:
   - WHEN: 'no cache file was read and fileCacheOnly is unset'
     MUST: 'merge the loaded keys into the cache'
   - WHEN: 'no cache file was read, fileCacheOnly is unset, cacheOnly is false, and etcd is configured'
-    MUST: 'write every loaded key to etcd, merged over what exists rather than replacing it'
+    MUST: 'write every loaded key to etcd, the active config-file keys included, merged over what exists rather than replacing it, a supplied config winning over the config-file values per key'
+    USES: root@Sources
   - WHEN: 'no cache file was read, fileCacheOnly is unset, and a file cache is configured'
     MUST: 'save the cache file after loading'
+  - WHEN: 'no config is given'
+    MUST: 'overlay the config-file keys on the loaded keys, a later file winning per key, including when a cache file was read'
+    USES: root@Sources
+  - WHEN: 'a config file cannot be read'
+    MUST: 'fail with the error "Could not read toxin config: <cause>", leaving the live settings intact and running no reload hooks'
+    USES: root@Sources
+  - WHEN: 'cacheOnly is true'
+    MUST-NOT: 'write config-file values to etcd'
+  - MUST-NOT: 'write to a config file'
   - MUST: 'run the registered reload hooks after the load'
     SEE: toxin.ReloadHook
+ERROR:
+  - WHEN: 'a source cannot be read: a config file, the cache file, or etcd'
+    MUST: 'return the error before touching the cache, leaving the live settings intact and running no reload hooks'
+  - WHEN: 'the cache file cannot be saved after loading'
+    MUST: 'return the save error after the loaded settings were installed and before the reload hooks run'
+    SEE: toxin.FileCache
 ---
 spec: Config.List
 INPUT:
@@ -278,6 +313,12 @@ SIDE-EFFECT:
   - WHEN: 'a directory delete event arrives and clearing is not allowed'
     MUST: 'leave the cache unchanged'
   - MUST-NOT: 'store a cache entry for a key outside the namespace'
+  - WHEN: 'a set or single-key delete event arrives for a key a config file supplies'
+    MUST: 'leave the config-file value in the cache'
+    USES: root@Sources
+  - WHEN: 'a directory delete event arrives, clearing is allowed, and config files supply keys'
+    MUST: 'restore the config-file values after emptying the cache'
+    USES: root@Sources
   - MUST: 'stop the watcher when the config is closed'
     SEE: Config.Close
 ---
@@ -291,12 +332,18 @@ INPUT:
   - MUST: 'take a clear flag'
 SIDE-EFFECT:
   - WHEN: 'the clear flag is set'
-    MUST: 'wipe the settings before loading'
+    MUST: 'replace the settings with the loaded sources as they are installed, only after every source was read'
   - MUST: 'load the configuration anew'
     SEE: Config.Load
   - WHEN: 'etcd is not configured'
     MUST: 'load the in-process and available file-cache sources'
     SEE: Config.Load
+  - MUST: 're-read the config files from disk'
+    USES: root@Sources
+ERROR:
+  - WHEN: 'a source read fails, a config file or etcd'
+    MUST: 'return the error, a config file failing with "Could not read toxin config: <cause>", leaving the previous settings intact and running no reload hooks'
+    USES: root@Sources
 ---
 spec: toxin.ReloadHook
 INPUT:

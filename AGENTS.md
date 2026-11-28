@@ -18,6 +18,11 @@ references live in the sibling repos `../pyconfig` and `../jetconfig`.
 - Root package (`*.go` at the repo root) — the public API of `20-api`:
   `Config`, construction and per-call options, the default instance.
   Every `TOXIN_*` read in `New` sits in one block gated by `WithEnv`.
+- `configfile.go` — the JSON config-file source (`WithConfigFile`,
+  `WithConfigFiles`, `TOXIN_CONFIG`); precedence is `root@Sources`.
+  Files are read into a fresh map before the cache is touched, and
+  `Config.fileOverrides` (under `Config.mu`) keeps watch events from
+  displacing their values.
 - `cmd/toxin` — the binary's `main`; version is set at link time.
 - `internal/etcd` — the etcd v3 client layer behind `10-etcd3`. `New`
   reads `TOXIN_ETCD`/`TOXIN_AUTH`/`TOXIN_SSL_*`; `NewWithOptions` takes
