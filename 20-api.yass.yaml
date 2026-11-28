@@ -119,7 +119,7 @@ RETURN:
     MUST: 'return the error ''No setting "<key>"'''
 ERROR:
   - WHEN: 'etcd is configured and the etcd read fails with anything other than not-found'
-    MUST: 'return that error to the caller'
+    MUST: 'return that error to the caller, with the call-site default as the value and without caching the default, while the strict variant returns no value with the error'
   - WHEN: 'etcd is configured and the etcd response carries no entry'
     MUST: 'treat the key as unset and log a warning'
   - WHEN: 'etcd is not configured and a parent file cache cannot be read'
@@ -127,6 +127,7 @@ ERROR:
     USES: Inheritance
 INVARIANT:
   - MUST: 'treat an absent key as a value outcome answered by the default, never as an error outside the strict variant'
+  - MUST-NOT: 'return nil in place of a given default when the non-strict read fails'
 ---
 spec: Config.Set
 INPUT:
@@ -301,6 +302,8 @@ RETURN:
     MUST: 'succeed at the first-use construction and load over the in-process sources'
   - MUST: 'expose package-level Get, Set, GetStrict and Clear that operate on the shared instance'
     SEE: Config.Get
+  - WHEN: 'the shared instance cannot be constructed'
+    MUST: 'have package-level Get return its default together with the construction error'
   - MUST: 'expose package-level reload and reload hook registration that operate on the shared instance'
     SEE: toxin.Reload
 ---

@@ -432,6 +432,21 @@ func TestUnreachableClusterFailsAfterRoughlyFifteenSeconds(t *testing.T) {
 	if elapsed > 30*time.Second {
 		t.Errorf("failure after %s, want the retries bounded near fifteen seconds", elapsed)
 	}
+
+	// The failure trips the breaker: the next call inside the cooldown
+	// fails fast with the same error.
+	start = time.Now()
+	_, again := c.Read(context.Background(), "/k", false)
+	elapsed = time.Since(start)
+	if again == nil {
+		t.Fatal("second Read against an unreachable cluster succeeded")
+	}
+	if elapsed >= time.Second {
+		t.Errorf("second failure after %s, want a fast failure under one second", elapsed)
+	}
+	if again.Error() != err.Error() {
+		t.Errorf("second failure = %q, want the same error %q", again, err)
+	}
 }
 
 // captureWarnings redirects this layer's warnings into a buffer for the

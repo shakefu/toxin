@@ -75,6 +75,18 @@ ERROR:
 INVARIANT:
   - MUST: 'carry a five second deadline on every single-request call'
   - MUST: 'retry a timed-out call, about three attempts in total, so an unreachable cluster surfaces failure after roughly fifteen seconds rather than five'
+  - WHEN: 'a call fails on its deadline or with an Unavailable transport failure while the caller''s own context is still live'
+    MUST: 'remember that failure and fail every call within a five second cooldown at once with the remembered error, making no attempt'
+  - WHEN: 'the cooldown has expired and the remembered failure still stands'
+    MUST: 'let exactly one call through as a single-attempt probe under the five second deadline while concurrent calls keep failing fast, refreshing the cooldown and the remembered error when the probe fails on its deadline or the transport, and restarting the cooldown when the probe''s caller cancels it'
+  - WHEN: 'a failure is remembered and the connection to the cluster becomes ready after the failure landed'
+    MUST: 'forget the failure and serve the call with the full retry budget at once'
+  - WHEN: 'the connection still reported ready when the failure landed'
+    MUST-NOT: 'treat that ready report as recovery until the connection has reported not ready or a call has reached the cluster'
+  - WHEN: 'a call succeeds or the cluster answers it'
+    MUST: 'forget any remembered failure'
+  - MUST-NOT: 'begin failing fast on a not-found result or on a call the caller cancelled or whose deadline the caller set'
+  - MUST-NOT: 'leave the probe marked in flight once it ends, however it ends'
 ---
 spec: etcd.Error
 INPUT:
