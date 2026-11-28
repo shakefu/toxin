@@ -17,11 +17,16 @@ references live in the sibling repos `../pyconfig` and `../jetconfig`.
   etcd management subcommands.
 - Root package (`*.go` at the repo root) — the public API of `20-api`:
   `Config`, construction and per-call options, the default instance.
+  Every `TOXIN_*` read in `New` sits in one block gated by `WithEnv`.
 - `cmd/toxin` — the binary's `main`; version is set at link time.
-- `internal/etcd` — the etcd v3 client layer behind `10-etcd3`.
+- `internal/etcd` — the etcd v3 client layer behind `10-etcd3`. `New`
+  reads `TOXIN_ETCD`/`TOXIN_AUTH`/`TOXIN_SSL_*`; `NewWithOptions` takes
+  them pre-resolved and never reads the environment.
 - `internal/cli` — the scanner and the six management subcommands behind
   `30-cli`, on venom.
-- `internal/log` — the levelled logger behind `TOXIN_LOGLEVEL`.
+- `internal/log` — the levelled logger behind `TOXIN_LOGLEVEL`;
+  `zap.go` adapts it to zap so the etcd client's diagnostics obey the
+  same level.
 - `internal/testutil` — the shared testcontainers etcd container the
   tests run against.
 - `script/` — scripts-to-rule-them-all harness: thin stubs run drop-ins

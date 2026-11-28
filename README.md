@@ -32,7 +32,12 @@ defer config.Close() // also stops the watcher
 
 More options: `WithCache`, `WithCaseSensitive`, `WithInherit`,
 `WithInheritPrefix`, `WithInheritKey`, `WithInheritDepth`,
-`WithAllowClear`, `WithLogLevel`, `WithFileCache`.
+`WithAllowClear`, `WithLogLevel`, `WithFileCache`, `WithEnv`.
+
+`WithEnv(false)` opts one `Config` out of every `TOXIN_*` runtime
+variable, so it is built from its options and defaults alone; inherited
+parents follow it. Environment reading is on by default, and
+`toxin.Default()` always reads the environment.
 
 Reads fall back to a default; the strict variant turns an unset key into
 the error `No setting "<key>"`:
@@ -123,8 +128,8 @@ variables.
 | `TOXIN_SSL_CA` | CA certificate file path; the file may hold concatenated PEM. | |
 | `TOXIN_SSL_CERT` | Client certificate file path. | |
 | `TOXIN_SSL_KEY` | Client key file path. | |
-| `TOXIN_AUTH` | Basic auth credentials `username:password`. | |
-| `TOXIN_LOGLEVEL` | One of silly, debug, info, warn, critical. | critical |
+| `TOXIN_AUTH` | Basic auth credentials `username:password`; both parts non-empty. | |
+| `TOXIN_LOGLEVEL` | One of silly, debug, info, warn, critical; governs every toxin log line, etcd client diagnostics included. | critical |
 | `TOXIN_CACHE` | Directory for the file cache. | |
 | `TOXIN_WATCH` | Any non-empty value enables watching. | |
 | `TOXIN_INHERIT_DEPTH` | Maximum inheritance depth. | `2` |
@@ -133,7 +138,15 @@ A variable set to the empty string reads as unset — except `TOXIN_WATCH`,
 where any non-empty value is truthy. `TOXIN_LOGLEVEL` and `TOXIN_CACHE`
 override the corresponding options; `TOXIN_PREFIX`, `TOXIN_WATCH` and
 `TOXIN_INHERIT_DEPTH` are consulted only when the corresponding option is
-not supplied.
+not supplied. A `Config` built with `WithEnv(false)` reads none of them.
+
+The diagnostics the etcd client logs itself go through toxin's logger at
+`TOXIN_LOGLEVEL`. toxin never lets the client build its own stderr logger
+or derive one from `ETCD_CLIENT_DEBUG`. grpc's process-wide logger is
+grpc's: clientv3 installs a stderr one when `ETCD_CLIENT_DEBUG` is set at
+process start, `GRPC_GO_LOG_*` tune it, and toxin leaves it alone.
+Warnings about ignored credentials, such as an incomplete `TOXIN_AUTH`,
+print at every level and never echo the value.
 
 Per-setting overrides are not runtime configuration and carry no prefix:
 `toxin.Env` checks the environment variable named by the key, then the

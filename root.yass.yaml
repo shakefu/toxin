@@ -41,7 +41,15 @@ content: |
                          Used only with an effective etcd member list.
                          (from PYCONFIG_ETCD_AUTH)
     TOXIN_LOGLEVEL       One of silly, debug, info, warn, critical;
-                         default critical. (from JETCONFIG_LOGLEVEL)
+                         default critical. Governs every log message
+                         toxin emits, including the diagnostics the etcd
+                         client itself logs: toxin never lets the client
+                         build its own stderr logger or derive one from
+                         ETCD_CLIENT_DEBUG. grpc's process-wide logger,
+                         which clientv3 installs when ETCD_CLIENT_DEBUG is
+                         set at process start and which GRPC_GO_LOG_*
+                         tune, belongs to grpc and is outside toxin's
+                         control. (from JETCONFIG_LOGLEVEL)
     TOXIN_CACHE          Directory for the file cache.
                          (from JETCONFIG_CACHE)
     TOXIN_WATCH          Any non-empty value enables watching.
@@ -51,6 +59,10 @@ content: |
 
   An environment variable set to the empty string reads as unset, except
   TOXIN_WATCH, where any non-empty value is truthy.
+
+  Reading these variables is on by default and can be turned off per
+  instance: a Config constructed with WithEnv(false) reads none of them and
+  takes its runtime configuration from its options and defaults alone.
 
   Per-setting environment overrides are not runtime configuration and
   carry no TOXIN_ prefix: toxin.Env checks the setting name uppercased
@@ -64,6 +76,9 @@ INPUT:
     SEE: 20-api@toxin.Default
   - MUST: 'resolve a setting from an environment variable before the configuration before a default'
     SEE: 20-api@toxin.Env
+  - MUST: 'let a library caller opt one configuration instance out of every `TOXIN_*` runtime variable, so it takes its runtime configuration from options and defaults alone'
+    SEE: 20-api@toxin.New
+    USES: EnvNaming
   - MUST: 'accept shell invocation of the toxin binary, which dispatches between a source-scanning mode and etcd management subcommands'
     SEE: 30-cli@cli.Main
   - MUST: 'address settings by dot-notation keys resolved under a namespace prefix'
