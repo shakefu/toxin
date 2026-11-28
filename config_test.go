@@ -1,9 +1,12 @@
 package toxin
 
 import (
+	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/shakefu/toxin/internal/log"
 	"github.com/shakefu/toxin/internal/testutil"
@@ -237,4 +240,50 @@ func newTestConfigWithEnv(t *testing.T, env map[string]string, opts ...Option) *
 		t.Fatalf("toxin.New: %v", err)
 	}
 	return c
+}
+
+// 20-api@toxin.New::INPUT: the etcd client's diagnostics go through the
+// Config's levelled logger, so at critical a refusing member produces no
+// stderr output, even with ETCD_CLIENT_DEBUG set for the etcd client.
+func TestNewEtcdClientDiagnosticsSilentAtCritical(t *testing.T) {
+	clearToxinEnv(t)
+	t.Setenv("ETCD_CLIENT_DEBUG", "true")
+	var c *Config
+	stderr := captureNoEtcdStderr(t, func() {
+		var err error
+		c, err = New(WithLogLevel("critical"), WithHosts("127.0.0.1:1"))
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+		defer cancel()
+		if _, err := c.client.Read(ctx, "/config/k", false); err == nil {
+			t.Error("Read against a refusing member succeeded")
+		}
+		_ = c.Close()
+	})
+	if stderr != "" {
+		t.Errorf("New at critical wrote %d bytes to stderr: %q, want none", len(stderr), stderr)
+	}
+}
+
+// 20-api@toxin.New::INPUT: at warn, the etcd client's own failed-retry
+// diagnostic reaches the Config's logger, in toxin's format on stderr.
+func TestNewEtcdClientDiagnosticsReachLoggerAtWarn(t *testing.T) {
+	clearToxinEnv(t)
+	stderr := captureNoEtcdStderr(t, func() {
+		c, err := New(WithLogLevel("warn"), WithHosts("127.0.0.1:1"))
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+		defer cancel()
+		if _, err := c.client.Read(ctx, "/config/k", false); err == nil {
+			t.Error("Read against a refusing member succeeded")
+		}
+		_ = c.Close()
+	})
+	if !strings.Contains(stderr, "WARN etcd-client: retrying of unary invoker failed") {
+		t.Errorf("stderr = %q, want the etcd client's failed-retry warning through the Config's logger", stderr)
+	}
 }

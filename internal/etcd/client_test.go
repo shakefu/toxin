@@ -27,23 +27,30 @@ import (
 // an error naming the member.
 func TestNewRejectsMemberMatchingNoForm(t *testing.T) {
 	clearEtcdEnv(t)
-	for _, member := range []string{
-		"host:notaport",  // port is not numeric
-		"host:",          // empty port
-		"a:b:c",          // two colons without a scheme
-		"http://",        // empty host
-		":2379",          // empty host
-		"user:pass@host", // credentials without a scheme
-		"1http://host",   // scheme does not start with a letter
-		"host/with/slashes",
+	for _, tc := range []struct {
+		member string
+		named  string // how the error names the member, password redacted
+	}{
+		{"host:notaport", "host:notaport"},                      // port is not numeric
+		{"host:", "host:"},                                      // empty port
+		{"a:b:c", "a:b:c"},                                      // two colons without a scheme
+		{"http://", "http://"},                                  // empty host
+		{":2379", ":2379"},                                      // empty host
+		{"user:pass@host", "user:***@host"},                     // credentials without a scheme
+		{"1http://host", "1http://host"},                        // scheme does not start with a letter
+		{"host/with/slashes", "host/with/slashes"},              // path in the host
+		{"http://user:@host:2379", "http://user:***@host:2379"}, // empty password
+		{"http://:pass@host:2379", "http://:***@host:2379"},     // empty username
+		{"http://:@host:2379", "http://:***@host:2379"},         // empty username and password
+		{"http://user@host:2379", "http://user@host:2379"},      // credentials without a colon
 	} {
-		_, err := New(member)
+		_, err := New(tc.member)
 		if err == nil {
-			t.Errorf("New(%q) = no error, want rejection", member)
+			t.Errorf("New(%q) = no error, want rejection", tc.member)
 			continue
 		}
-		if !strings.Contains(err.Error(), member) {
-			t.Errorf("New(%q) error %q does not name the member", member, err)
+		if !strings.Contains(err.Error(), tc.named) {
+			t.Errorf("New(%q) error %q does not name the member as %q", tc.member, err, tc.named)
 		}
 	}
 }
@@ -94,14 +101,16 @@ func TestNewReturnsNilClientWhenNoMembersRemain(t *testing.T) {
 	clearEtcdEnv(t)
 	warnings := captureWarnings(t)
 	t.Setenv("TOXIN_SSL_CA", filepath.Join(t.TempDir(), "missing.pem"))
-	t.Setenv("TOXIN_AUTH", "justauser")
-	for _, args := range [][]string{nil, {" ,, "}} {
-		c, err := New(args...)
-		if err != nil {
-			t.Fatalf("New(%v): %v", args, err)
-		}
-		if c != nil {
-			t.Errorf("New(%v) client = %v, want nil", args, c)
+	for _, auth := range []string{"justauser", "user:", ":secret", ":"} {
+		t.Setenv("TOXIN_AUTH", auth)
+		for _, args := range [][]string{nil, {" ,, "}} {
+			c, err := New(args...)
+			if err != nil {
+				t.Fatalf("New(%v) with TOXIN_AUTH %q: %v", args, auth, err)
+			}
+			if c != nil {
+				t.Errorf("New(%v) with TOXIN_AUTH %q client = %v, want nil", args, auth, c)
+			}
 		}
 	}
 	if warnings.String() != "" {
@@ -187,6 +196,9 @@ func TestNewAcceptsEachMemberForm(t *testing.T) {
 	}{
 		{"https://user:pass@etcd1:2379", "https://etcd1:2379", "user", "pass"},
 		{"http://u:p@etcd1", "http://etcd1", "u", "p"},
+		// The credentials split at the first colon, so the password may
+		// itself hold colons.
+		{"https://user:a:b@etcd1:2379", "https://etcd1:2379", "user", "a:b"},
 	}
 	for _, c := range credCases {
 		m, err := parseMember(c.member, "http")
@@ -268,8 +280,9 @@ func TestNewLoadsTLSCredentialsFromEnv(t *testing.T) {
 	}
 }
 
-// etcd.Client INPUT: when TOXIN_AUTH carries no colon, log a warning and
-// ignore the incomplete credentials.
+// etcd.Client INPUT: when TOXIN_AUTH carries no colon, or has an empty
+// username or password, log a warning that does not echo the credentials
+// and ignore them, keeping any credentials a member carries.
 func TestNewWarnsAndIgnoresIncompleteTOXINAUTH(t *testing.T) {
 	clearEtcdEnv(t)
 	warnings := captureWarnings(t)
@@ -290,6 +303,54 @@ func TestNewWarnsAndIgnoresIncompleteTOXINAUTH(t *testing.T) {
 	// The client without credentials still serves requests.
 	if _, err := c.Put(context.Background(), "/client-warn/k", "v", 0); err != nil {
 		t.Errorf("Put after ignored credentials: %v", err)
+	}
+
+	// An empty username or password is incomplete too. The warning names
+	// TOXIN_AUTH without echoing the value, and the incomplete value does
+	// not clobber credentials a member carries.
+	for _, auth := range []string{"user:", ":secret", ":"} {
+		warnings.Reset()
+		t.Setenv("TOXIN_AUTH", auth)
+		c, err := New(testutil.Etcd(t))
+		if err != nil {
+			t.Fatalf("New with TOXIN_AUTH %q: %v", auth, err)
+		}
+		if c.username != "" || c.password != "" {
+			t.Errorf("TOXIN_AUTH %q credentials = %q/%q, want the incomplete value ignored", auth, c.username, c.password)
+		}
+		_ = c.Close()
+		got := warnings.String()
+		if n := strings.Count(got, "warning:"); n != 1 {
+			t.Errorf("TOXIN_AUTH %q logged %d warnings %q, want exactly one", auth, n, got)
+		}
+		if !strings.Contains(got, "TOXIN_AUTH") {
+			t.Errorf("TOXIN_AUTH %q warning %q does not mention TOXIN_AUTH", auth, got)
+		}
+		if strings.Contains(got, "secret") {
+			t.Errorf("TOXIN_AUTH %q warning %q echoes the credentials", auth, got)
+		}
+	}
+
+	// Member credentials survive an incomplete TOXIN_AUTH.
+	endpoint := testutil.Etcd(t)
+	enableAuth(t, endpoint)
+	for _, auth := range []string{"justauser", "user:", ":secret", ":"} {
+		warnings.Reset()
+		t.Setenv("TOXIN_AUTH", auth)
+		authed, err := New("http://root:sekretpw@" + strings.TrimPrefix(endpoint, "http://"))
+		if err != nil {
+			t.Fatalf("New with member credentials and TOXIN_AUTH %q: %v", auth, err)
+		}
+		if authed.username != "root" || authed.password != "sekretpw" {
+			t.Errorf("TOXIN_AUTH %q clobbered member credentials: %q/%q", auth, authed.username, authed.password)
+		}
+		if _, err := authed.Put(context.Background(), "/client-warn/authed", "v", 0); err != nil {
+			t.Errorf("Put with member credentials and TOXIN_AUTH %q: %v", auth, err)
+		}
+		_ = authed.Close()
+		if !strings.Contains(warnings.String(), "TOXIN_AUTH") {
+			t.Errorf("TOXIN_AUTH %q with member credentials logged no warning", auth)
+		}
 	}
 }
 

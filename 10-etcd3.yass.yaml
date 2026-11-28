@@ -42,23 +42,38 @@ spec: etcd.Client
 INPUT:
   - MUST: 'accept a member list as a single comma-separated string or a list of member strings, splitting every argument on commas'
   - MUST: 'trim surrounding whitespace from each member and drop entries that trim to nothing'
-  - WHEN: '`TOXIN_ETCD` is non-empty'
+  - MUST: 'offer an environment-reading constructor taking a member list, and an options constructor taking pre-resolved options'
+  - WHEN: 'the environment-reading constructor is used and `TOXIN_ETCD` is non-empty'
     MUST: 'use it in place of any programmatic member list'
     USES: root@EnvNaming
-  - MUST: 'accept each member as `host`, `host:port`, `scheme://host:port`, or `scheme://user:password@host:port`'
+  - WHEN: 'the environment-reading constructor is used and the resolved member list is non-empty'
+    MUST: 'take the credentials from `TOXIN_AUTH` and the TLS file paths from `TOXIN_SSL_CA`, `TOXIN_SSL_CERT` and `TOXIN_SSL_KEY`'
+    USES: root@EnvNaming
+  - WHEN: 'the options constructor is used'
+    MUST: 'take the member list, basic authentication credentials, TLS file paths and levelled logger from the options'
+  - WHEN: 'the options constructor is used'
+    MUST-NOT: 'read any environment variable'
+  - MUST: 'accept each member as `host`, `host:port`, `scheme://host:port`, or `scheme://user:password@host:port`, where the credential form carries a non-empty username and a non-empty password'
   - MUST: 'default the scheme of a member without one to http, or to https when TLS material is configured'
   - WHEN: 'the resolved member list is non-empty and a member or `TOXIN_AUTH` carries user:password credentials'
-    MUST: 'use them for basic authentication'
+    MUST: 'use them for basic authentication, splitting `TOXIN_AUTH` at its first colon so the password may hold colons'
     USES: root@EnvNaming
-  - WHEN: 'the resolved member list is non-empty and `TOXIN_AUTH` carries no colon'
-    MUST: 'log a warning and ignore the incomplete credentials'
+  - WHEN: 'the resolved member list is non-empty and the credentials carry no colon, or have an empty username or password'
+    MUST: 'log exactly one warning, regardless of the log level, that does not echo the credentials, and ignore them, keeping any credentials a member carries'
+  - WHEN: 'the incomplete credentials came from `TOXIN_AUTH`'
+    MUST: 'name `TOXIN_AUTH` in the warning'
     USES: root@EnvNaming
   - WHEN: 'the resolved member list is non-empty'
-    MUST: 'load the contents of `TOXIN_SSL_CA`, `TOXIN_SSL_CERT` and `TOXIN_SSL_KEY` as the TLS credentials when set, concatenating the contents of the comma-separated `TOXIN_SSL_CA` paths with newlines'
+    MUST: 'load the CA, client certificate and client key files as the TLS credentials when their paths are set, concatenating the contents of comma-separated CA paths with newlines'
     USES: root@EnvNaming
 RETURN:
   - WHEN: 'the resolved member list is non-empty'
     MUST: 'yield a client that holds the resolved member list and credentials and serves every read, write, delete and watch'
+  - WHEN: 'the resolved member list is non-empty'
+    MUST: 'route the underlying etcd client''s diagnostics through the supplied levelled logger, or discard them when none is supplied'
+    USES: root@EnvNaming
+  - WHEN: 'the resolved member list is non-empty'
+    MUST-NOT: 'let the underlying etcd client build a logger of its own, whether its default stderr logger or one derived from `ETCD_CLIENT_DEBUG`'
   - WHEN: 'the resolved member list is empty'
     MUST: 'return a nil client and a nil error'
   - WHEN: 'the resolved member list is empty'
@@ -70,7 +85,11 @@ RETURN:
   - WHEN: 'the resolved member list is empty'
     MUST-NOT: 'construct the underlying etcd client'
 ERROR:
-  - WHEN: 'a member matches none of `host`, `host:port`, `scheme://host:port`, or `scheme://user:password@host:port`'
+  - WHEN: 'a TLS file cannot be read or holds no usable certificate material'
+    MUST: 'reject with an error naming the file path'
+  - WHEN: 'a rejected member carries a password'
+    MUST-NOT: 'echo the password in the error naming the member'
+  - WHEN: 'a member matches none of `host`, `host:port`, `scheme://host:port`, or `scheme://user:password@host:port` with a non-empty username and password'
     MUST: 'reject with an error naming the member'
 INVARIANT:
   - MUST: 'carry a five second deadline on every single-request call'

@@ -44,13 +44,25 @@ INPUT:
   - MUST: 'default the prefix to "config/", caching on, case sensitivity off, inheritance on with inherit key "config.inherit" and inherit depth two, watching off, and clearing off'
   - MUST: 'default to an absent etcd member list'
   - MUST: 'default the log level to critical'
+  - MUST: 'take an environment option, on by default, that turns reading of every `TOXIN_*` runtime variable on or off'
+    USES: root@EnvNaming
+  - WHEN: 'the environment option is supplied more than once'
+    MUST: 'honor the last supplied value'
   - MUST: 'trim whitespace and slashes from the prefix and give it exactly one trailing slash'
   - MUST: 'lowercase the prefix unless case sensitivity is enabled'
   - WHEN: 'the prefix trims to nothing'
     MUST: 'use the root prefix "/"'
-  - MUST: 'let `TOXIN_LOGLEVEL` override the log level option and `TOXIN_CACHE` supply the file cache directory'
+  - WHEN: 'environment reading is enabled'
+    MUST: 'let `TOXIN_LOGLEVEL` override the log level option and `TOXIN_CACHE` supply the file cache directory'
     USES: root@EnvNaming
-  - MUST: 'consult `TOXIN_PREFIX`, `TOXIN_WATCH` and `TOXIN_INHERIT_DEPTH` only when the corresponding option is not supplied'
+  - WHEN: 'environment reading is enabled'
+    MUST: 'consult `TOXIN_PREFIX`, `TOXIN_WATCH` and `TOXIN_INHERIT_DEPTH` only when the corresponding option is not supplied'
+    USES: root@EnvNaming
+  - WHEN: 'environment reading is disabled'
+    MUST-NOT: 'read any `TOXIN_*` runtime variable, for this configuration or for any parent it inherits from'
+    USES: root@EnvNaming
+  - WHEN: 'etcd is configured'
+    MUST: 'route the etcd client''s diagnostics through the configuration''s levelled logger, so the log level governs them'
     USES: root@EnvNaming
   - WHEN: 'watching is enabled and etcd is configured'
     MUST: 'start the watcher at construction'

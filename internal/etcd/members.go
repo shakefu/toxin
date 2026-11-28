@@ -19,7 +19,8 @@ type member struct {
 // parseMember resolves one member of the member list. A member is host,
 // host:port, scheme://host:port, or scheme://user:password@host:port; a
 // member without a scheme gets defaultScheme. A member matching none of
-// the forms is rejected with an error naming it.
+// the forms, including credentials with an empty username or password, is
+// rejected with an error naming it.
 func parseMember(raw string, defaultScheme string) (member, error) {
 	m := member{}
 	rest := raw
@@ -36,8 +37,9 @@ func parseMember(raw string, defaultScheme string) (member, error) {
 		if scheme == "" {
 			return m, invalidMember(raw)
 		}
+		// Both the username and the password must be non-empty.
 		user, pass, ok := strings.Cut(rest[:at], ":")
-		if !ok || user == "" {
+		if !ok || user == "" || pass == "" {
 			return m, invalidMember(raw)
 		}
 		m.username, m.password, m.hasCreds = user, pass, true
@@ -66,8 +68,29 @@ func parseMember(raw string, defaultScheme string) (member, error) {
 	return m, nil
 }
 
+// invalidMember names a rejected member with any password redacted.
 func invalidMember(raw string) error {
-	return fmt.Errorf("invalid etcd member %q", raw)
+	return fmt.Errorf("invalid etcd member %q", redactMember(raw))
+}
+
+// redactMember replaces the password in a member's user:password@ part
+// with "***", so an error naming the member never leaks the secret. The
+// credentials are located the way parseMember locates them: after any
+// scheme://, up to the last '@'.
+func redactMember(raw string) string {
+	head, rest := "", raw
+	if i := strings.Index(rest, "://"); i >= 0 {
+		head, rest = rest[:i+3], rest[i+3:]
+	}
+	at := strings.LastIndex(rest, "@")
+	if at < 0 {
+		return raw
+	}
+	user, _, hasPass := strings.Cut(rest[:at], ":")
+	if !hasPass {
+		return raw
+	}
+	return head + user + ":***" + rest[at:]
 }
 
 // validScheme matches a URL scheme: a letter followed by letters, digits,

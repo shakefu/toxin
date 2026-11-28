@@ -37,6 +37,7 @@ type options struct {
 	allowClear    bool
 	logLevel      string
 	fileCache     string
+	env           bool
 
 	prefixSet bool
 	watchSet  bool
@@ -52,8 +53,9 @@ func WithPrefix(prefix string) Option {
 
 // WithHosts sets the etcd member list and enables etcd when at least one
 // usable member remains: a single comma-separated string, one member per
-// argument, or a mix. TOXIN_ETCD, when non-empty, overrides it. With no
-// effective members, the Config uses in-process sources instead.
+// argument, or a mix. TOXIN_ETCD, when non-empty and environment reading is
+// on, overrides it. With no effective members, the Config uses in-process
+// sources instead.
 func WithHosts(hosts ...string) Option {
 	return func(o *options) { o.hosts = hosts }
 }
@@ -123,6 +125,16 @@ func WithFileCache(dir string) Option {
 	return func(o *options) { o.fileCache = dir }
 }
 
+// WithEnv turns reading of toxin's TOXIN_* runtime environment variables
+// on or off; it is on by default. With WithEnv(false), New reads none of
+// TOXIN_ETCD, TOXIN_AUTH, TOXIN_SSL_CA, TOXIN_SSL_CERT, TOXIN_SSL_KEY,
+// TOXIN_LOGLEVEL, TOXIN_CACHE, TOXIN_PREFIX, TOXIN_WATCH and
+// TOXIN_INHERIT_DEPTH, and the Config is built from its options and the
+// defaults alone. Per-setting overrides read by toxin.Env are unaffected.
+func WithEnv(on bool) Option {
+	return func(o *options) { o.env = on }
+}
+
 // Config is a configuration bound to one namespace prefix, backed by an
 // etcd v3 cluster when hosts are configured and by in-process sources
 // otherwise. Its methods are safe for concurrent use.
@@ -169,8 +181,10 @@ type Config struct {
 // TOXIN_LOGLEVEL overrides the log level option and TOXIN_CACHE supplies
 // the file cache directory; TOXIN_PREFIX, TOXIN_WATCH and
 // TOXIN_INHERIT_DEPTH are consulted only when the corresponding option is
-// not supplied. Watching starts at construction when enabled with etcd, and
+// not supplied. WithEnv(false) turns off every TOXIN_* variable for this
+// instance. Watching starts at construction when enabled with etcd, and
 // a configured file cache directory is created and opened at construction.
+// The etcd client's diagnostics go through the Config's levelled logger.
 func New(opts ...Option) (*Config, error) {
 	o := options{
 		prefix:       "config/",
@@ -179,17 +193,39 @@ func New(opts ...Option) (*Config, error) {
 		inheritKey:   "config.inherit",
 		inheritDepth: 2,
 		logLevel:     "critical",
+		env:          true,
 	}
 	for _, opt := range opts {
 		opt(&o)
 	}
 
-	// An environment variable set to the empty string reads as unset.
-	if v := os.Getenv("TOXIN_LOGLEVEL"); v != "" {
-		o.logLevel = v
-	}
-	if v := os.Getenv("TOXIN_CACHE"); v != "" {
-		o.fileCache = v
+	// Every TOXIN_* runtime variable is read here, and only when
+	// environment reading is on. An environment variable set to the empty
+	// string reads as unset.
+	var etcdEnv etcd.Env // the zero Env reads as an empty environment
+	envDepth := ""
+	if o.env {
+		if v := os.Getenv("TOXIN_LOGLEVEL"); v != "" {
+			o.logLevel = v
+		}
+		if v := os.Getenv("TOXIN_CACHE"); v != "" {
+			o.fileCache = v
+		}
+		if !o.depthSet {
+			envDepth = os.Getenv("TOXIN_INHERIT_DEPTH")
+		}
+		if !o.prefixSet {
+			if v := os.Getenv("TOXIN_PREFIX"); v != "" {
+				o.prefix = v
+			}
+		}
+		if !o.watchSet {
+			// Any non-empty TOXIN_WATCH value is truthy.
+			if v := os.Getenv("TOXIN_WATCH"); v != "" {
+				o.watch = true
+			}
+		}
+		etcdEnv = etcd.ReadEnv()
 	}
 
 	level, err := log.ParseLevel(o.logLevel)
@@ -197,28 +233,15 @@ func New(opts ...Option) (*Config, error) {
 		return nil, err
 	}
 
-	if !o.depthSet {
-		if v := os.Getenv("TOXIN_INHERIT_DEPTH"); v != "" {
-			depth, err := strconv.Atoi(v)
-			if err != nil || depth < 0 {
-				return nil, fmt.Errorf("invalid TOXIN_INHERIT_DEPTH %q", v)
-			}
-			o.inheritDepth = depth
+	if envDepth != "" {
+		depth, err := strconv.Atoi(envDepth)
+		if err != nil || depth < 0 {
+			return nil, fmt.Errorf("invalid TOXIN_INHERIT_DEPTH %q", envDepth)
 		}
+		o.inheritDepth = depth
 	}
 	if o.inheritDepth < 0 {
 		return nil, fmt.Errorf("inheritDepth must be an integer greater than or equal to 0")
-	}
-	if !o.prefixSet {
-		if v := os.Getenv("TOXIN_PREFIX"); v != "" {
-			o.prefix = v
-		}
-	}
-	if !o.watchSet {
-		// Any non-empty TOXIN_WATCH value is truthy.
-		if v := os.Getenv("TOXIN_WATCH"); v != "" {
-			o.watch = true
-		}
 	}
 
 	c := &Config{
@@ -239,7 +262,11 @@ func New(opts ...Option) (*Config, error) {
 		c.fileCache = NewFileCache(c.prefix, o.fileCache)
 	}
 
-	client, err := etcd.New(o.hosts...)
+	// The etcd client logs its own diagnostics through this Config's
+	// logger, so TOXIN_LOGLEVEL governs them too.
+	etcdOpts := etcdEnv.Options(o.hosts...)
+	etcdOpts.Logger = c.log
+	client, err := etcd.NewWithOptions(etcdOpts)
 	if err != nil {
 		return nil, err
 	}
