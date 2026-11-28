@@ -52,11 +52,13 @@ func defaultConfig() (*Config, error) {
 }
 
 // Get returns the value of the setting key on the process-wide Config, or
-// def when the key is unset. See Config.Get.
+// def when the key is unset. When the shared instance cannot be
+// constructed, it returns def alongside the construction error. See
+// Config.Get.
 func Get(key string, def any, opts ...CallOption) (any, error) {
 	c, err := defaultConfig()
 	if err != nil {
-		return nil, err
+		return def, err
 	}
 	return c.Get(key, def, opts...)
 }

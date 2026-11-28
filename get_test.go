@@ -2,6 +2,7 @@ package toxin
 
 import (
 	"errors"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -370,5 +371,166 @@ func TestGetNumberSurvivesSecondRoundTrip(t *testing.T) {
 	}
 	if !jsonEqual(t, v2, 12345678901234) {
 		t.Errorf("second round trip = %v (%T), want the integer literal intact", v2, v2)
+	}
+}
+
+// closedClientConfig returns a Config whose etcd connection is closed, so
+// every read fails without a not-found shape.
+func closedClientConfig(t *testing.T, opts ...Option) *Config {
+	t.Helper()
+	c := newTestConfig(t, opts...)
+	if err := c.client.Close(); err != nil {
+		t.Fatalf("closing the client: %v", err)
+	}
+	return c
+}
+
+// 20-api@Config.Get::ERROR / INVARIANT: a failed etcd read returns the
+// call-site default alongside the error, without caching it; a nil
+// default yields nil with the error, and the strict variant returns no
+// value with the error.
+func TestGetFailedReadReturnsDefaultWithErrorUncached(t *testing.T) {
+	c := closedClientConfig(t, WithPrefix("get-fail-def/"))
+
+	got, err := c.Get("app.key", "default")
+	var etcdErr *etcd.Error
+	if !errors.As(err, &etcdErr) {
+		t.Fatalf("Get error = %v, want the etcd failure", err)
+	}
+	if got != "default" {
+		t.Errorf("failed Get = %v, want the call-site default %q", got, "default")
+	}
+	if v, ok := c.cachedValue("app.key"); ok {
+		t.Errorf("failed Get cached the default %v; want nothing cached", v)
+	}
+
+	got, err = c.Get("app.key", nil)
+	if err == nil || got != nil {
+		t.Errorf("failed Get with no default = %v, %v; want nil with the error", got, err)
+	}
+
+	got, err = c.GetStrict("app.key")
+	if err == nil || got != nil {
+		t.Errorf("failed GetStrict = %v, %v; want nil with the error", got, err)
+	}
+	if errors.Is(err, ErrNoSetting) {
+		t.Errorf("failed GetStrict = %v, want the etcd failure rather than an unset key", err)
+	}
+}
+
+// 20-api@Config.Get::ERROR: a file-cache-loaded value still answers from
+// the cache once etcd fails, and a miss against the failing cluster
+// returns the default with the error without caching it or writing it to
+// the file cache.
+func TestGetFileCacheWithFailingClusterReturnsDefaultUncached(t *testing.T) {
+	dir := t.TempDir()
+	c := newTestConfig(t, WithPrefix("get-fc-fail/"), WithFileCache(dir))
+	if err := c.fileCache.Save(map[string]any{"app.cached": "fromfile"}); err != nil {
+		t.Fatalf("saving the file cache: %v", err)
+	}
+	if _, err := c.Load(); err != nil {
+		t.Fatalf("Load from the file cache: %v", err)
+	}
+	before, err := os.ReadFile(c.fileCache.Filename())
+	if err != nil {
+		t.Fatalf("reading the file cache: %v", err)
+	}
+	if err := c.client.Close(); err != nil {
+		t.Fatalf("closing the client: %v", err)
+	}
+
+	got, err := c.Get("app.cached", "def")
+	if err != nil || got != "fromfile" {
+		t.Errorf("cached Get = %v, %v; want the file-cache value without error", got, err)
+	}
+
+	got, err = c.Get("app.miss", "def")
+	if err == nil || got != "def" {
+		t.Errorf("missing Get = %v, %v; want the default with the etcd failure", got, err)
+	}
+	if v, ok := c.cachedValue("app.miss"); ok {
+		t.Errorf("failed Get cached the default %v; want nothing cached", v)
+	}
+	after, err := os.ReadFile(c.fileCache.Filename())
+	if err != nil {
+		t.Fatalf("reading the file cache: %v", err)
+	}
+	if string(after) != string(before) {
+		t.Errorf("file cache changed to %s after a failed Get; want %s", after, before)
+	}
+}
+
+// 20-api@Config.Get::ERROR / 10-etcd3@etcd.Client::INVARIANT: against an
+// unreachable cluster the first miss waits out the retries, then repeat
+// misses and Env lookups through Get fail fast, each answering with its
+// own default. 192.0.2.1 is TEST-NET-1, reserved and never reachable.
+func TestGetUnreachableClusterFailsFastAfterFirstFailure(t *testing.T) {
+	clearToxinEnv(t)
+	c, err := New(WithHosts("192.0.2.1:2379"), WithPrefix("get-unreach/"))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	t.Cleanup(func() { _ = c.client.Close() })
+
+	got, err := c.Get("app.first", "first-default")
+	if err == nil || got != "first-default" {
+		t.Fatalf("first Get = %v, %v; want the default with the etcd failure", got, err)
+	}
+
+	for _, key := range []string{"app.second", "app.first", "app.third"} {
+		start := time.Now()
+		got, err := c.Get(key, key+"-default")
+		if el := time.Since(start); el >= time.Second {
+			t.Errorf("repeat Get(%q) took %s, want a fast failure under one second", key, el)
+		}
+		if err == nil || got != key+"-default" {
+			t.Errorf("repeat Get(%q) = %v, %v; want the default with the etcd failure", key, got, err)
+		}
+		if v, ok := c.cachedValue(key); ok {
+			t.Errorf("failed Get(%q) cached %v; want nothing cached", key, v)
+		}
+	}
+
+	const envKey = "TOXIN_TEST_UNREACHABLE_DB_HOST"
+	t.Setenv(envKey, "")
+	if err := os.Unsetenv(envKey); err != nil {
+		t.Fatalf("unsetting %s: %v", envKey, err)
+	}
+	lookup := func(setting string) (any, bool) {
+		v, err := c.Get(setting, nil)
+		return v, err == nil && v != nil
+	}
+	start := time.Now()
+	for i := 0; i < 3; i++ {
+		if v := Env(envKey, lookup, "env-default"); v != "env-default" {
+			t.Errorf("Env = %v, want the default %q", v, "env-default")
+		}
+	}
+	if el := time.Since(start); el >= time.Second {
+		t.Errorf("Env lookups took %s, want fast failures under one second", el)
+	}
+}
+
+// 20-api@toxin.Default::RETURN: when the shared instance cannot be
+// constructed, package-level Get returns its default with the error.
+func TestPackageGetReturnsDefaultWhenDefaultFails(t *testing.T) {
+	isolateDefault(t)
+	clearToxinEnv(t)
+	t.Setenv("TOXIN_LOGLEVEL", "not-a-level")
+
+	got, err := Get("app.key", "default")
+	if err == nil {
+		t.Fatal("package Get succeeded with an unconstructible shared instance")
+	}
+	if got != "default" {
+		t.Errorf("package Get = %v, want the default %q alongside the error", got, "default")
+	}
+	got, err = Get("app.key", nil)
+	if err == nil || got != nil {
+		t.Errorf("package Get with no default = %v, %v; want nil with the error", got, err)
+	}
+	got, err = GetStrict("app.key")
+	if err == nil || got != nil {
+		t.Errorf("package GetStrict = %v, %v; want nil with the error", got, err)
 	}
 }

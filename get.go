@@ -19,12 +19,19 @@ var ErrNoSetting = errors.New("No setting")
 // (cacheResult), whether etcd is contacted at all (cacheOnly) and whether
 // inheritance is consulted (allowInherited). Without etcd, a fallback is
 // inserted only when no local setting already exists.
+//
+// When the read fails, for example because etcd is unreachable, Get
+// returns def alongside the error rather than nil, so a caller that
+// tolerates the failure still has its default; def is not cached. A nil
+// def yields nil with the error. GetStrict returns no value on failure.
 func (c *Config) Get(key string, def any, opts ...CallOption) (any, error) {
 	o := getDefaults(opts)
 	k := c.coerceKey(key)
 	v, found, err := c.lookup(k, o)
 	if err != nil {
-		return nil, err
+		// A failed read still answers with the caller's default, which is
+		// not cached: the key's real value is unknown, not unset.
+		return def, err
 	}
 	if found {
 		return v, nil

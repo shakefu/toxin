@@ -44,6 +44,10 @@ type Client struct {
 
 	closed    chan struct{}
 	closeOnce sync.Once
+
+	// breaker fails calls fast after a transport or deadline failure; its
+	// zero value is ready to use.
+	breaker breaker
 }
 
 // New builds a Client from a member list. The list may be given as a
@@ -159,21 +163,35 @@ func (c *Client) closedCh() <-chan struct{} { return c.closed }
 
 // call runs a single-request call under the request deadline, retrying a
 // timed-out call so an unreachable cluster surfaces failure after roughly
-// fifteen seconds rather than five.
+// fifteen seconds rather than five. After such a failure the client's
+// breaker trips: calls inside the cooldown fail fast with the remembered
+// error, and once it expires a single one-attempt probe is let through
+// while concurrent calls keep failing fast. A connection that becomes
+// ready after the trip, or any call that reaches the cluster, closes the
+// breaker again.
 func (c *Client) call(ctx context.Context, fn func(context.Context) error) error {
+	attempts, probe, fast := c.breaker.admit(c.connReady)
+	if fast != nil {
+		return fast
+	}
+	if probe {
+		// Cleared however the probe ends, a panic included, so the
+		// breaker can never wedge with a probe marked in flight.
+		defer c.breaker.endProbe(ctx)
+	}
 	var err error
-	for attempt := 0; attempt < maxAttempts; attempt++ {
+	for attempt := 0; attempt < attempts; attempt++ {
 		cctx, cancel := context.WithTimeout(ctx, requestTimeout)
 		err = fn(cctx)
 		cancel()
 		if err == nil {
-			return nil
+			break
 		}
 		if ctx.Err() != nil || !timedOut(err) {
 			break
 		}
 	}
-	return wrapError(err)
+	return c.breaker.settle(ctx, err, c.connReady)
 }
 
 // timedOut reports whether err is a client or gRPC deadline expiry.
