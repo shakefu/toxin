@@ -101,6 +101,33 @@ func TestClearCacheOnlyEmptiesCacheWithoutEtcd(t *testing.T) {
 	}
 }
 
+// 20-api@Config.Clear::SIDE-EFFECT: cacheOnly empties the cache without requiring allowClear or contacting etcd.
+func TestClearCacheOnlyWithoutAllowClearPreservesEtcd(t *testing.T) {
+	c := newTestConfig(t, WithPrefix("clear-cacheonly-noallow/"), WithAllowClear(false))
+	if err := c.Set("app.key", "stored"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	if err := c.Clear(CacheOnly(true)); err != nil {
+		t.Fatalf("Clear(cacheOnly): %v", err)
+	}
+	got, err := c.Get("app.key", nil, CacheOnly(true))
+	if err != nil || got != nil {
+		t.Errorf("cache after Clear(cacheOnly) = %v, want empty (err %v)", got, err)
+	}
+	if got, err := c.Get("app.key", nil); err != nil || got != "stored" {
+		t.Errorf("etcd value after Clear(cacheOnly) = %v, %v; want stored", got, err)
+	}
+	if err := c.Clear(); err == nil || err.Error() != "clear() is not allowed on this instance" {
+		t.Errorf("Clear() error = %v, want allowClear guard", err)
+	}
+	if got, err := c.Get("app.key", nil); err != nil || got != "stored" {
+		t.Errorf("etcd value after guarded Clear() = %v, %v; want stored", got, err)
+	}
+	if got, err := c.Get("app.key", nil, CacheOnly(true)); err != nil || got != "stored" {
+		t.Errorf("cache after guarded Clear() = %v, %v; want stored", got, err)
+	}
+}
+
 // root@toxin::INVARIANT: etcd failures surface to library callers as
 // errors — an etcd delete failure other than not-found is returned by
 // Clear, not treated as the already-empty namespace.
